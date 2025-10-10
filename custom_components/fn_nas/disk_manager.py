@@ -36,95 +36,120 @@ class DiskManager:
         self.logger.debug("No match found for patterns: %s", patterns)
         return default
     
+    def _format_capacity(self, capacity_str: str) -> str:
+        """将容量字符串格式化为GB或TB格式"""
+        if not capacity_str or capacity_str == "未知":
+            return "未知"
+        
+        try:
+            # 处理逗号分隔的数字（如 "1,000,204,886,016 bytes"）
+            capacity_str = capacity_str.replace(',', '')
+            
+            # 提取数字和单位
+            import re
+            # 匹配数字和单位（如 "500 GB", "1.0 TB", "1000204886016 bytes", "1,000,204,886,016 bytes"）
+            match = re.search(r'(\d+(?:\.\d+)?)\s*([KMGT]?B|bytes?)', capacity_str, re.IGNORECASE)
+            if not match:
+                # 如果没有匹配到单位，尝试直接提取数字
+                numbers = re.findall(r'\d+', capacity_str)
+                if numbers:
+                    # 取最大的数字（通常是容量值）
+                    value = float(max(numbers, key=len))
+                    bytes_value = value  # 假设为字节
+                else:
+                    return capacity_str
+            else:
+                value = float(match.group(1))
+                unit = match.group(2).upper()
+                
+                # 转换为字节
+                if unit in ['B', 'BYTE', 'BYTES']:
+                    bytes_value = value
+                elif unit in ['KB', 'KIB']:
+                    bytes_value = value * 1024
+                elif unit in ['MB', 'MIB']:
+                    bytes_value = value * 1024 * 1024
+                elif unit in ['GB', 'GIB']:
+                    bytes_value = value * 1024 * 1024 * 1024
+                elif unit in ['TB', 'TIB']:
+                    bytes_value = value * 1024 * 1024 * 1024 * 1024
+                else:
+                    bytes_value = value  # 默认假设为字节
+            
+            # 转换为合适的单位
+            if bytes_value >= 1024**4:  # 1 TB
+                return f"{bytes_value / (1024**4):.1f} TB"
+            elif bytes_value >= 1024**3:  # 1 GB
+                return f"{bytes_value / (1024**3):.1f} GB"
+            elif bytes_value >= 1024**2:  # 1 MB
+                return f"{bytes_value / (1024**2):.1f} MB"
+            elif bytes_value >= 1024:  # 1 KB
+                return f"{bytes_value / 1024:.1f} KB"
+            else:
+                return f"{bytes_value:.1f} B"
+                
+        except Exception as e:
+            self.logger.debug(f"格式化容量失败: {capacity_str}, 错误: {e}")
+            return capacity_str
+    
     async def check_disk_active(self, device: str, window: int = 30) -> bool:
         """检查硬盘在指定时间窗口内是否有活动"""
         try:
-            stat_path = f"/sys/block/{device}/stat"
+            # 首先检查硬盘当前状态
+            current_status = await self.get_disk_activity(device)
             
-            # 读取当前统计文件
-            stat_output = await self.coordinator.run_command(f"cat {stat_path} 2>/dev/null")
-            if not stat_output:
-                self.logger.debug(f"无法读取 {stat_path}，默认返回活跃状态")
-                return True
-                
-            # 解析统计信息
-            stats = stat_output.split()
-            if len(stats) < 11:
-                self.logger.debug(f"无效的统计信息格式：{stat_output}")
-                return True
-            
-            try:
-                # /sys/block/{device}/stat 字段说明：
-                # 0: read I/Os requests      读请求次数
-                # 1: read I/Os merged        读请求合并次数
-                # 2: read sectors            读扇区数
-                # 3: read ticks              读操作耗时(ms)
-                # 4: write I/Os requests     写请求次数
-                # 5: write I/Os merged       写请求合并次数
-                # 6: write sectors           写扇区数
-                # 7: write ticks             写操作耗时(ms)
-                # 8: in_flight               当前进行中的I/O请求数
-                # 9: io_ticks                I/O活动时间(ms)
-                # 10: time_in_queue          队列中的总时间(ms)
-                
-                current_stats = {
-                    'read_ios': int(stats[0]),
-                    'write_ios': int(stats[4]),
-                    'in_flight': int(stats[8]),
-                    'io_ticks': int(stats[9])
-                }
-                
-                # 如果当前有正在进行的I/O操作，直接返回活跃状态
-                if current_stats['in_flight'] > 0:
-                    self.logger.debug(f"磁盘 {device} 有正在进行的I/O操作: {current_stats['in_flight']}")
-                    self.disk_io_stats_cache[device] = current_stats
-                    return True
-                
-                # 检查是否有缓存的统计信息
-                cached_stats = self.disk_io_stats_cache.get(device)
-                
-                if cached_stats:
-                    # 比较I/O请求次数的变化
-                    read_ios_diff = current_stats['read_ios'] - cached_stats['read_ios']
-                    write_ios_diff = current_stats['write_ios'] - cached_stats['write_ios']
-                    io_ticks_diff = current_stats['io_ticks'] - cached_stats['io_ticks']
-                    
-                    self.logger.debug(f"磁盘 {device} I/O变化: 读={read_ios_diff}, 写={write_ios_diff}, 活动时间={io_ticks_diff}ms")
-                    
-                    # 如果在检测窗口内有I/O活动，认为磁盘活跃
-                    if read_ios_diff > 0 or write_ios_diff > 0 or io_ticks_diff > 100:  # 100ms内的活动
-                        self.logger.debug(f"磁盘 {device} 在窗口期内有I/O活动")
-                        self.disk_io_stats_cache[device] = current_stats
-                        return True
-                    
-                    # 检查io_ticks是否表明最近有活动
-                    # io_ticks是累积值，如果在合理范围内增长，说明有轻微活动
-                    if io_ticks_diff > 0 and io_ticks_diff < window * 1000:  # 在窗口时间内的轻微活动
-                        self.logger.debug(f"磁盘 {device} 有轻微I/O活动")
-                        self.disk_io_stats_cache[device] = current_stats
-                        return True
-                else:
-                    # 首次检测，保存当前状态并认为活跃
-                    self.logger.debug(f"磁盘 {device} 首次检测，保存统计信息")
-                    self.disk_io_stats_cache[device] = current_stats
-                    return True
-                
-                # 更新缓存
-                self.disk_io_stats_cache[device] = current_stats
-                
-                # 检查硬盘电源状态
-                power_state = await self.get_disk_power_state(device)
-                if power_state in ["standby", "sleep", "idle"]:
-                    self.logger.debug(f"磁盘 {device} 处于省电状态: {power_state}")
-                    return False
-                
-                # 所有检查都通过，返回非活跃状态
-                self.logger.debug(f"磁盘 {device} 判定为非活跃状态")
+            # 如果硬盘处于休眠状态，直接返回非活跃
+            if current_status == "休眠中":
+                self.logger.debug(f"硬盘 {device} 处于休眠状态，不执行详细检测")
                 return False
+            
+            # 如果硬盘处于空闲状态，检查是否有近期活动
+            if current_status == "空闲中":
+                # 检查缓存的统计信息来判断近期活动
+                stat_path = f"/sys/block/{device}/stat"
+                stat_output = await self.coordinator.run_command(f"cat {stat_path} 2>/dev/null")
                 
-            except (ValueError, IndexError) as e:
-                self.logger.debug(f"解析统计信息失败: {e}")
+                if stat_output:
+                    stats = stat_output.split()
+                    if len(stats) >= 11:
+                        try:
+                            current_read_ios = int(stats[0])
+                            current_write_ios = int(stats[4])
+                            current_io_ticks = int(stats[9])
+                            
+                            cached_stats = self.disk_io_stats_cache.get(device)
+                            if cached_stats:
+                                read_diff = current_read_ios - cached_stats.get('read_ios', 0)
+                                write_diff = current_write_ios - cached_stats.get('write_ios', 0)
+                                io_ticks_diff = current_io_ticks - cached_stats.get('io_ticks', 0)
+                                
+                                # 如果在最近30秒内有I/O活动，认为硬盘活跃
+                                if read_diff > 0 or write_diff > 0 or io_ticks_diff > 100:
+                                    self.logger.debug(f"硬盘 {device} 近期有I/O活动，需要更新信息")
+                                    return True
+                            
+                            # 更新缓存
+                            self.disk_io_stats_cache[device] = {
+                                'read_ios': current_read_ios,
+                                'write_ios': current_write_ios,
+                                'io_ticks': current_io_ticks
+                            }
+                            
+                        except (ValueError, IndexError):
+                            pass
+                
+                # 如果硬盘空闲且没有近期活动，返回非活跃
+                self.logger.debug(f"硬盘 {device} 处于空闲状态且无近期活动，不执行详细检测")
+                return False
+            
+            # 如果硬盘处于活动中，返回活跃状态
+            if current_status == "活动中":
+                self.logger.debug(f"硬盘 {device} 处于活动中，执行详细检测")
                 return True
+            
+            # 默认情况下返回活跃状态
+            self.logger.debug(f"硬盘 {device} 状态未知，默认执行详细检测")
+            return True
                 
         except Exception as e:
             self.logger.error(f"检测硬盘活动状态失败: {str(e)}")
@@ -166,7 +191,7 @@ class DiskManager:
             if power_state in ["standby", "sleep"]:
                 return "休眠中"
             
-            # 检查最近的I/O活动
+            # 检查最近的I/O活动 - 使用非侵入性方式
             stat_path = f"/sys/block/{device}/stat"
             stat_output = await self.coordinator.run_command(f"cat {stat_path} 2>/dev/null")
             
@@ -175,9 +200,11 @@ class DiskManager:
                 if len(stats) >= 11:
                     try:
                         in_flight = int(stats[8])  # 当前进行中的I/O
+                        io_ticks = int(stats[9])   # I/O活动时间(ms)
                         
                         # 如果有正在进行的I/O，返回活动中
                         if in_flight > 0:
+                            self.logger.debug(f"硬盘 {device} 有进行中的I/O操作: {in_flight}")
                             return "活动中"
                         
                         # 检查缓存的统计信息来判断近期活动
@@ -188,18 +215,54 @@ class DiskManager:
                             
                             read_diff = current_read_ios - cached_stats.get('read_ios', 0)
                             write_diff = current_write_ios - cached_stats.get('write_ios', 0)
+                            io_ticks_diff = io_ticks - cached_stats.get('io_ticks', 0)
                             
-                            if read_diff > 0 or write_diff > 0:
+                            # 如果在最近30秒内有I/O活动，认为硬盘活动中
+                            if read_diff > 0 or write_diff > 0 or io_ticks_diff > 100:  # 100ms内的活动
+                                self.logger.debug(f"硬盘 {device} 近期有I/O活动: 读={read_diff}, 写={write_diff}, 活动时间={io_ticks_diff}ms")
+                                
+                                # 更新缓存统计信息
+                                self.disk_io_stats_cache[device] = {
+                                    'read_ios': current_read_ios,
+                                    'write_ios': current_write_ios,
+                                    'in_flight': in_flight,
+                                    'io_ticks': io_ticks
+                                }
                                 return "活动中"
+                        else:
+                            # 首次检测，保存当前状态并认为活跃
+                            self.logger.debug(f"硬盘 {device} 首次检测，保存统计信息")
+                            self.disk_io_stats_cache[device] = {
+                                'read_ios': int(stats[0]),
+                                'write_ios': int(stats[4]),
+                                'in_flight': in_flight,
+                                'io_ticks': io_ticks
+                            }
+                            return "活动中"  # 首次检测默认返回活动中
                         
-                    except (ValueError, IndexError):
-                        pass
+                        # 更新缓存统计信息
+                        self.disk_io_stats_cache[device] = {
+                            'read_ios': int(stats[0]),
+                            'write_ios': int(stats[4]),
+                            'in_flight': in_flight,
+                            'io_ticks': io_ticks
+                        }
+                        
+                        # 如果没有活动，返回空闲中
+                        self.logger.debug(f"硬盘 {device} 处于空闲状态")
+                        return "空闲中"
+                        
+                    except (ValueError, IndexError) as e:
+                        self.logger.debug(f"解析硬盘 {device} 统计信息失败: {e}")
+                        return "活动中"  # 出错时默认返回活动中，避免中断休眠
             
-            return "空闲中"
+            # 如果无法获取统计信息，默认返回活动中
+            self.logger.debug(f"无法获取硬盘 {device} 的统计信息，默认返回活动中")
+            return "活动中"
             
         except Exception as e:
             self.logger.error(f"获取硬盘 {device} 状态失败: {str(e)}", exc_info=True)
-            return "未知"
+            return "活动中"  # 出错时默认返回活动中，避免中断休眠
     
     async def get_disks_info(self) -> list[dict]:
         disks = []
@@ -336,31 +399,45 @@ class DiskManager:
     
     async def _get_full_disk_info(self, disk_info, device_path):
         """获取硬盘的完整信息（模型、序列号、健康状态等）"""
-        # 获取基本信息
+        # 获取基本信息 - 首先尝试NVMe格式
         info_output = await self.coordinator.run_command(f"smartctl -i {device_path}")
         self.logger.debug("smartctl -i output for %s: %s", disk_info["device"], info_output[:200] + "..." if len(info_output) > 200 else info_output)
         
-        # 模型
+        # 检查是否为NVMe设备
+        is_nvme = "nvme" in disk_info["device"].lower()
+        
+        # 模型 - 增强NVMe支持
         disk_info["model"] = self.extract_value(
             info_output, 
             [
                 r"Device Model:\s*(.+)",
                 r"Model(?: Family)?\s*:\s*(.+)",
-                r"Model\s*Number:\s*(.+)"
+                r"Model\s*Number:\s*(.+)",
+                r"Product:\s*(.+)",  # NVMe格式
+                r"Model Number:\s*(.+)",  # NVMe格式
             ]
         )
         
-        # 序列号
+        # 序列号 - 增强NVMe支持
         disk_info["serial"] = self.extract_value(
             info_output, 
-            r"Serial Number\s*:\s*(.+)"
+            [
+                r"Serial Number\s*:\s*(.+)",
+                r"Serial Number:\s*(.+)",  # NVMe格式
+                r"Serial\s*:\s*(.+)",  # NVMe格式
+            ]
         )
         
-        # 容量
-        disk_info["capacity"] = self.extract_value(
-            info_output, 
-            r"User Capacity:\s*([^[]+)"
-        )
+        # 容量 - 增强NVMe支持并转换为GB/TB格式
+        capacity_patterns = [
+            r"User Capacity:\s*([^[]+)",
+            r"Namespace 1 Size/Capacity:\s*([^[]+)",  # NVMe格式
+            r"Total NVM Capacity:\s*([^[]+)",  # NVMe格式
+            r"Capacity:\s*([^[]+)",  # NVMe格式
+        ]
+        
+        raw_capacity = self.extract_value(info_output, capacity_patterns)
+        disk_info["capacity"] = self._format_capacity(raw_capacity)
         
         # 健康状态
         health_output = await self.coordinator.run_command(f"smartctl -H {device_path}")
@@ -437,6 +514,46 @@ class DiskManager:
         # 改进的通电时间检测逻辑 - 处理特殊格式
         power_on_hours = "未知"
         
+        # 检查是否为NVMe设备
+        is_nvme = "nvme" in disk_info["device"].lower()
+        
+        # 方法0：NVMe设备的通电时间提取（优先处理）
+        if is_nvme:
+            # NVMe格式的通电时间提取 - 支持带逗号的数字格式
+            nvme_patterns = [
+                r"Power On Hours\s*:\s*([\d,]+)",  # 支持带逗号的数字格式（如 "6,123"）
+                r"Power On Time\s*:\s*([\d,]+)",  # NVMe备用格式
+                r"Power on hours\s*:\s*([\d,]+)",  # 小写格式
+                r"Power on time\s*:\s*([\d,]+)",  # 小写格式
+            ]
+            
+            for pattern in nvme_patterns:
+                match = re.search(pattern, data_output, re.IGNORECASE)
+                if match:
+                    try:
+                        # 处理带逗号的数字格式（如 "6,123"）
+                        hours_str = match.group(1).replace(',', '')
+                        hours = int(hours_str)
+                        power_on_hours = f"{hours} 小时"
+                        self.logger.debug("Found NVMe power_on_hours via pattern %s: %s", pattern, power_on_hours)
+                        break
+                    except:
+                        continue
+            
+            # 如果还没找到，尝试在SMART数据部分查找
+            if power_on_hours == "未知":
+                # 查找SMART数据部分中的Power On Hours
+                smart_section_match = re.search(r"SMART/Health Information.*?Power On Hours\s*:\s*([\d,]+)", 
+                                               data_output, re.IGNORECASE | re.DOTALL)
+                if smart_section_match:
+                    try:
+                        hours_str = smart_section_match.group(1).replace(',', '')
+                        hours = int(hours_str)
+                        power_on_hours = f"{hours} 小时"
+                        self.logger.debug("Found NVMe power_on_hours in SMART section: %s", power_on_hours)
+                    except:
+                        pass
+        
         # 方法1：提取属性9的RAW_VALUE（处理特殊格式）
         attr9_match = re.search(
             r"^\s*9\s+Power_On_Hours\b[^\n]+\s+(\d+)h(?:\+(\d+)m(?:\+(\d+)\.\d+s)?)?",
@@ -474,7 +591,7 @@ class DiskManager:
                 [
                     # 精确匹配属性9行
                     r"^\s*9\s+Power_On_Hours\b[^\n]+\s+(\d+)\s*$",
-                    
+                    r"^\s*9\s+Power On Hours\b[^\n]+\s+(\d+)h(?:\+(\d+)m(?:\+(\d+)\.\d+s)?)?",
                     # 通用匹配模式
                     r"9\s+Power_On_Hours\b.*?(\d+)\b",
                     r"Power_On_Hours\b.*?(\d+)\b",
