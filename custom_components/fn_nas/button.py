@@ -18,11 +18,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     # 1. 添加NAS重启按钮
     entities.append(RebootButton(coordinator, config_entry.entry_id))
     
-    # 2. 添加虚拟机重启按钮
+    # 2. 添加虚拟机重启按钮和强制关机按钮
     if "vms" in coordinator.data:
         for vm in coordinator.data["vms"]:
             entities.append(
                 VMRebootButton(
+                    coordinator, 
+                    vm["name"],
+                    vm.get("title", vm["name"]),
+                    config_entry.entry_id
+                )
+            )
+            entities.append(
+                VMDestroyButton(
                     coordinator, 
                     vm["name"],
                     vm.get("title", vm["name"]),
@@ -162,4 +170,49 @@ class DockerContainerRestartButton(CoordinatorEntity, ButtonEntity):
             "容器名称": self.container_name,
             "操作类型": "重启容器",
             "提示": "重启操作可能需要一些时间完成"
+        }
+
+class VMDestroyButton(CoordinatorEntity, ButtonEntity):
+    def __init__(self, coordinator, vm_name, vm_title, entry_id):
+        super().__init__(coordinator)
+        self.vm_name = vm_name
+        self.vm_title = vm_title
+        self._attr_name = f"{vm_title} 强制关机"
+        self._attr_unique_id = f"{entry_id}_flynas_vm_{vm_name}_destroy"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, f"vm_{vm_name}")},
+            "name": vm_title,
+            "via_device": (DOMAIN, DEVICE_ID_NAS)
+        }
+        self._attr_icon = "mdi:power-off"  # 使用关机图标
+
+        self.vm_manager = coordinator.vm_manager if hasattr(coordinator, 'vm_manager') else None
+
+    async def async_press(self):
+        """强制关机虚拟机"""
+        if not self.vm_manager:
+            _LOGGER.error("vm_manager不可用，无法强制关机虚拟机 %s", self.vm_name)
+            return
+            
+        try:
+            success = await self.vm_manager.control_vm(self.vm_name, "destroy")
+            if success:
+                # 更新状态为"强制关机中"
+                for vm in self.coordinator.data["vms"]:
+                    if vm["name"] == self.vm_name:
+                        vm["state"] = "destroying"
+                self.async_write_ha_state()
+                
+                # 在下次更新时恢复实际状态
+                self.coordinator.async_add_listener(self.async_write_ha_state)
+        except Exception as e:
+            _LOGGER.error("强制关机虚拟机时出错: %s", str(e), exc_info=True)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "虚拟机名称": self.vm_name,
+            "操作类型": "强制关机",
+            "警告": "此操作会强制关闭虚拟机，可能导致数据丢失",
+            "提示": "仅在虚拟机无法正常关机时使用此功能"
         }

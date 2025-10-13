@@ -213,29 +213,84 @@ class SystemManager:
             for i, line in enumerate(lines):
                 line_lower = line.lower().strip()
                 
-                # 主板温度关键词
+                # 主板温度关键词 - 扩展关键词列表
                 if any(keyword in line_lower for keyword in [
                     "motherboard", "mobo", "mb", "system", "chipset", 
-                    "ambient", "temp1:", "temp2:", "temp3:", "systin"
+                    "ambient", "temp1:", "temp2:", "temp3:", "systin",
+                    "acpitz", "thermal", "pch", "platform", "board",
+                    "sys", "thermal zone", "acpi", "isa"
                 ]) and not any(cpu_keyword in line_lower for cpu_keyword in [
                     "cpu", "core", "package", "processor", "tctl", "tdie"
                 ]) and not any(exclude in line_lower for exclude in ["fan", "rpm"]):
                     
                     self._debug_log(f"找到可能的主板温度行: {line}")
                     
+                    # 多种温度格式匹配
+                    temp_value = None
+                    
+                    # 格式1: +45.0°C (high = +80.0°C, crit = +95.0°C)
                     if '+' in line and '°c' in line_lower:
                         try:
                             temp_match = line.split('+')[1].split('°')[0].strip()
-                            temp = float(temp_match)
-                            # 主板温度通常在15-70度之间
-                            if 15 <= temp <= 70:
-                                self._info_log(f"从sensors提取主板温度: {temp:.1f}°C")
-                                return f"{temp:.1f} °C"
-                            else:
-                                self._debug_log(f"主板温度值超出合理范围: {temp:.1f}°C")
-                        except (ValueError, IndexError) as e:
-                            self._debug_log(f"解析主板温度失败: {e}")
-                            continue
+                            temp_value = float(temp_match)
+                        except (ValueError, IndexError):
+                            pass
+                    
+                    # 格式2: 45.0°C
+                    if temp_value is None and '°c' in line_lower:
+                        try:
+                            # 查找数字后跟°C的模式
+                            import re
+                            temp_match = re.search(r'(\d+\.?\d*)\s*°c', line_lower)
+                            if temp_match:
+                                temp_value = float(temp_match.group(1))
+                        except (ValueError, AttributeError):
+                            pass
+                    
+                    # 格式3: 45.0 C (没有°符号)
+                    if temp_value is None and (' c' in line_lower or 'c ' in line_lower):
+                        try:
+                            # 查找数字后跟C的模式
+                            import re
+                            temp_match = re.search(r'(\d+\.?\d*)\s*c', line_lower)
+                            if temp_match:
+                                temp_value = float(temp_match.group(1))
+                        except (ValueError, AttributeError):
+                            pass
+                    
+                    if temp_value is not None:
+                        # 主板温度通常在15-70度之间，但放宽范围到10-80度
+                        if 10 <= temp_value <= 80:
+                            # 存储候选值，不立即返回
+                            import re
+                            if not hasattr(self, '_temp_candidates'):
+                                self._temp_candidates = []
+                            self._temp_candidates.append((temp_value, line))
+                            self._debug_log(f"找到有效主板温度候选: {temp_value:.1f}°C")
+                        else:
+                            self._debug_log(f"主板温度值超出合理范围: {temp_value:.1f}°C")
+                        continue
+            
+            # 处理候选值
+            if hasattr(self, '_temp_candidates') and self._temp_candidates:
+                # 优先选择温度在25-45度之间的值（典型主板温度）
+                ideal_candidates = [t for t in self._temp_candidates if 25 <= t[0] <= 45]
+                if ideal_candidates:
+                    best_temp = ideal_candidates[0][0]  # 取第一个理想候选值
+                else:
+                    # 如果没有理想值，取第一个候选值
+                    best_temp = self._temp_candidates[0][0]
+                
+                self._info_log(f"从sensors提取主板温度: {best_temp:.1f}°C")
+                # 清理候选值
+                delattr(self, '_temp_candidates')
+                return f"{best_temp:.1f} °C"
+            
+            # 如果没有找到主板温度，尝试备用方法
+            self._debug_log("尝试备用方法获取主板温度")
+            mobo_temp = self._extract_mobo_temp_fallback(sensors_output)
+            if mobo_temp != "未知":
+                return mobo_temp
             
             self._warning_log("未在sensors输出中找到主板温度")
             return "未知"
@@ -244,9 +299,58 @@ class SystemManager:
             self._error_log(f"解析sensors主板温度输出失败: {e}")
             return "未知"
 
+    def _extract_mobo_temp_fallback(self, sensors_output: str) -> str:
+        """备用方法获取主板温度"""
+        try:
+            lines = sensors_output.split('\n')
+            
+            # 方法1: 查找非CPU的温度传感器
+            for line in lines:
+                line_lower = line.lower().strip()
+                
+                # 跳过明显的CPU相关行
+                if any(cpu_keyword in line_lower for cpu_keyword in [
+                    "cpu", "core", "package", "processor", "tctl", "tdie"
+                ]):
+                    continue
+                
+                # 查找温度值
+                if '°c' in line_lower or ' c' in line_lower:
+                    # 尝试提取温度值
+                    import re
+                    temp_match = re.search(r'(\d+\.?\d*)\s*[°]?\s*c', line_lower)
+                    if temp_match:
+                        temp_value = float(temp_match.group(1))
+                        if 15 <= temp_value <= 60:  # 主板温度合理范围
+                            self._info_log(f"通过备用方法获取主板温度: {temp_value:.1f}°C")
+                            return f"{temp_value:.1f} °C"
+            
+            # 方法2: 查找hwmon设备中的主板温度
+            for i, line in enumerate(lines):
+                line_lower = line.lower()
+                if "hwmon" in line_lower and "temp" in line_lower:
+                    # 检查接下来的几行是否有温度值
+                    for j in range(i+1, min(i+5, len(lines))):
+                        next_line = lines[j].lower()
+                        if '°c' in next_line or ' c' in next_line:
+                            import re
+                            temp_match = re.search(r'(\d+\.?\d*)\s*[°]?\s*c', next_line)
+                            if temp_match:
+                                temp_value = float(temp_match.group(1))
+                                if 15 <= temp_value <= 60:
+                                    self._info_log(f"通过hwmon获取主板温度: {temp_value:.1f}°C")
+                                    return f"{temp_value:.1f} °C"
+            
+            return "未知"
+            
+        except Exception as e:
+            self._debug_log(f"备用方法获取主板温度失败: {e}")
+            return "未知"
+
     def format_uptime(self, seconds: float) -> str:
         """格式化运行时间为易读格式"""
         try:
+            days, remainder = divmod(seconds, 86400)
             days, remainder = divmod(seconds, 86400)
             hours, remainder = divmod(remainder, 3600)
             minutes, seconds = divmod(remainder, 60)

@@ -84,7 +84,7 @@ class VMManager:
 
     async def control_vm(self, vm_name, action):
         """控制虚拟机操作"""
-        valid_actions = ["start", "shutdown", "reboot"]
+        valid_actions = ["start", "shutdown", "reboot", "destroy"]
         if action not in valid_actions:
             raise ValueError(f"无效操作: {action}")
         
