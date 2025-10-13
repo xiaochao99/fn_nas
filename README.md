@@ -33,7 +33,7 @@
 1.  进入**HACS商店**​
 2.  添加自定义存储库：
 ```shell
-https://github.com/anxms/fn_nas
+https://github.com/xiaochao99/fn_nas
 ```
 3.  搜索"飞牛NAS"，点击下载
 4.  ​**重启Home Assistant服务**
