@@ -92,11 +92,14 @@ class DiskManager:
             self.logger.debug(f"格式化容量失败: {capacity_str}, 错误: {e}")
             return capacity_str
     
-    async def check_disk_active(self, device: str, window: int = 30) -> bool:
+    async def check_disk_active(self, device: str, window: int = 30, current_status: str = None) -> bool:
         """检查硬盘在指定时间窗口内是否有活动"""
         try:
             # 首先检查硬盘当前状态
-            current_status = await self.get_disk_activity(device)
+            if current_status is None:
+                current_status = await self.get_disk_activity(device)
+            else:
+                self.logger.debug(f"使用传入的状态: {device} = {current_status}")
             
             # 如果硬盘处于休眠状态，直接返回非活跃
             if current_status == "休眠中":
@@ -138,8 +141,8 @@ class DiskManager:
                         except (ValueError, IndexError):
                             pass
                 
-                # 如果硬盘空闲且没有近期活动，返回非活跃
-                self.logger.debug(f"硬盘 {device} 处于空闲状态且无近期活动，不执行详细检测")
+                # 如果硬盘空闲且没有近期活动，使用缓存信息
+                self.logger.debug(f"硬盘 {device} 处于空闲状态且无近期活动，使用缓存信息")
                 return False
             
             # 如果硬盘处于活动中，返回活跃状态
@@ -186,9 +189,10 @@ class DiskManager:
     async def get_disk_activity(self, device: str) -> str:
         """获取硬盘活动状态（活动中/空闲中/休眠中）"""
         try:
-            # 先检查电源状态
+            # 先检查电源状态 - 这是最可靠的休眠检测方法
             power_state = await self.get_disk_power_state(device)
             if power_state in ["standby", "sleep"]:
+                self.logger.debug(f"硬盘 {device} 电源状态为 {power_state}，判定为休眠中")
                 return "休眠中"
             
             # 检查最近的I/O活动 - 使用非侵入性方式
@@ -256,9 +260,19 @@ class DiskManager:
                         self.logger.debug(f"解析硬盘 {device} 统计信息失败: {e}")
                         return "活动中"  # 出错时默认返回活动中，避免中断休眠
             
-            # 如果无法获取统计信息，默认返回活动中
-            self.logger.debug(f"无法获取硬盘 {device} 的统计信息，默认返回活动中")
-            return "活动中"
+            # 如果无法获取统计信息，检查硬盘是否可访问
+            try:
+                # 尝试读取设备信息，如果成功说明硬盘可访问
+                test_output = await self.coordinator.run_command(f"ls -la /dev/{device} 2>/dev/null")
+                if test_output and device in test_output:
+                    self.logger.debug(f"硬盘 {device} 可访问但无统计信息，默认返回活动中")
+                    return "活动中"
+                else:
+                    self.logger.debug(f"硬盘 {device} 不可访问，可能处于休眠状态")
+                    return "休眠中"
+            except:
+                self.logger.debug(f"硬盘 {device} 检测失败，默认返回活动中")
+                return "活动中"
             
         except Exception as e:
             self.logger.error(f"获取硬盘 {device} 状态失败: {str(e)}", exc_info=True)
@@ -331,31 +345,31 @@ class DiskManager:
                     disks.append(disk_info)
                     continue
                 
-                # 检查硬盘是否活跃
-                is_active = await self.check_disk_active(device, window=30)
+                # 检查硬盘是否活跃，传入当前状态确保一致性
+                is_active = await self.check_disk_active(device, window=30, current_status=status)
                 if not is_active:
                     self.logger.debug(f"硬盘 {device} 处于非活跃状态，使用上一次获取的信息")
                     
                     # 优先使用缓存的完整信息
                     if cached_info:
                         disk_info.update({
-                            "model": cached_info.get("model", "未检测"),
-                            "serial": cached_info.get("serial", "未检测"),
-                            "capacity": cached_info.get("capacity", "未检测"),
-                            "health": cached_info.get("health", "未检测"),
-                            "temperature": cached_info.get("temperature", "未检测"),
-                            "power_on_hours": cached_info.get("power_on_hours", "未检测"),
+                            "model": cached_info.get("model", "未知"),
+                            "serial": cached_info.get("serial", "未知"),
+                            "capacity": cached_info.get("capacity", "未知"),
+                            "health": cached_info.get("health", "未知"),
+                            "temperature": cached_info.get("temperature", "未知"),
+                            "power_on_hours": cached_info.get("power_on_hours", "未知"),
                             "attributes": cached_info.get("attributes", {})
                         })
                     else:
                         # 如果没有缓存信息，使用默认值
                         disk_info.update({
-                            "model": "未检测",
-                            "serial": "未检测",
-                            "capacity": "未检测",
-                            "health": "未检测",
-                            "temperature": "未检测",
-                            "power_on_hours": "未检测",
+                            "model": "未知",
+                            "serial": "未知",
+                            "capacity": "未知",
+                            "health": "未知",
+                            "temperature": "未知",
+                            "power_on_hours": "未知",
                             "attributes": {}
                         })
                     

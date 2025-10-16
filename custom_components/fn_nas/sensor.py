@@ -302,7 +302,7 @@ class DiskSensor(CoordinatorEntity, SensorEntity):
             if disk["device"] == self.device_id:
                 if self.sensor_type == HDD_TEMP:
                     temp = disk.get("temperature")
-                    if temp is None or temp == "未知" or temp == "未检测":
+                    if temp is None or temp == "未知":
                         return None
                     if isinstance(temp, str):
                         try:
@@ -316,8 +316,6 @@ class DiskSensor(CoordinatorEntity, SensorEntity):
                     return None
                 elif self.sensor_type == HDD_HEALTH:
                     health = disk.get("health", "未知")
-                    if health == "未检测":
-                        return "未检测"
                     return health if health != "未知" else "未知状态"
                 elif self.sensor_type == HDD_STATUS:
                     return disk.get("status", "未知")
