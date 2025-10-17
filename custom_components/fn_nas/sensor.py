@@ -3,8 +3,8 @@ from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, Sen
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import UnitOfTemperature
 from .const import (
-    DOMAIN, HDD_TEMP, HDD_HEALTH, HDD_STATUS, SYSTEM_INFO, ICON_DISK, 
-    ICON_TEMPERATURE, ICON_HEALTH, ATTR_DISK_MODEL, ATTR_SERIAL_NO,
+    DOMAIN, HDD_TEMP, HDD_STATUS, SYSTEM_INFO, ICON_DISK, 
+    ICON_TEMPERATURE, ATTR_DISK_MODEL, ATTR_SERIAL_NO,
     ATTR_POWER_ON_HOURS, ATTR_TOTAL_CAPACITY, ATTR_HEALTH_STATUS,
     DEVICE_ID_NAS, DATA_UPDATE_COORDINATOR
 )
@@ -38,22 +38,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             )
             existing_ids.add(temp_uid)
         
-        # 健康状态传感器
-        health_uid = f"{config_entry.entry_id}_{disk['device']}_health"
-        if health_uid not in existing_ids:
-            entities.append(
-                DiskSensor(
-                    coordinator, 
-                    disk["device"], 
-                    HDD_HEALTH,
-                    f"硬盘 {disk.get('model', '未知')} 健康状态",
-                    health_uid,
-                    None,
-                    ICON_HEALTH,
-                    disk
-                )
-            )
-            existing_ids.add(health_uid)
+
         
         # 硬盘状态传感器
         status_uid = f"{config_entry.entry_id}_{disk['device']}_status"
@@ -314,9 +299,7 @@ class DiskSensor(CoordinatorEntity, SensorEntity):
                     elif isinstance(temp, (int, float)):
                         return temp
                     return None
-                elif self.sensor_type == HDD_HEALTH:
-                    health = disk.get("health", "未知")
-                    return health if health != "未知" else "未知状态"
+
                 elif self.sensor_type == HDD_STATUS:
                     return disk.get("status", "未知")
         return None
