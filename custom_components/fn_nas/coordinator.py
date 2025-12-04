@@ -79,7 +79,9 @@ class FlynasCoordinator(DataUpdateCoordinator):
             },
             "ups": {},
             "vms": [],
-            "docker_containers": []
+            "docker_containers": [],
+            "zpools": [],
+            "scrub_status": {}
         }
     
     def _debug_log(self, message: str):
@@ -385,6 +387,18 @@ class FlynasCoordinator(DataUpdateCoordinator):
             disks = await self.disk_manager.get_disks_info()
             self._debug_log(f"磁盘信息获取完成，数量: {len(disks)}")
             
+            self._debug_log("开始获取ZFS存储池信息...")
+            zpools = await self.disk_manager.get_zpools()
+            self._debug_log(f"ZFS存储池信息获取完成，数量: {len(zpools)}")
+            
+            # 获取所有ZFS存储池的scrub状态
+            scrub_status = {}
+            for zpool in zpools:
+                self._debug_log(f"开始获取存储池 {zpool['name']} 的scrub状态...")
+                scrub_info = await self.disk_manager.get_zpool_status(zpool['name'])
+                scrub_status[zpool['name']] = scrub_info
+                self._debug_log(f"存储池 {zpool['name']} scrub状态获取完成")
+            
             self._debug_log("开始获取UPS信息...")
             ups_info = await self.ups_manager.get_ups_info()
             self._debug_log("UPS信息获取完成")
@@ -416,7 +430,9 @@ class FlynasCoordinator(DataUpdateCoordinator):
                 "system": {**system, "status": status},
                 "ups": ups_info,
                 "vms": vms,
-                "docker_containers": docker_containers
+                "docker_containers": docker_containers,
+                "zpools": zpools,
+                "scrub_status": scrub_status
             }
             
             self._debug_log(f"数据更新完成: disks={len(disks)}, vms={len(vms)}, containers={len(docker_containers)}")
@@ -437,6 +453,24 @@ class FlynasCoordinator(DataUpdateCoordinator):
     async def reboot_system(self):
         """重启系统 - 委托给SystemManager"""
         return await self.system_manager.reboot_system()
+    
+    async def scrub_zpool(self, pool_name: str) -> bool:
+        """执行ZFS存储池数据一致性检查"""
+        try:
+            self._debug_log(f"开始对ZFS存储池 {pool_name} 执行scrub操作")
+            command = f"zpool scrub {pool_name}"
+            result = await self.run_command(command)
+            
+            if result and not result.lower().startswith("cannot"):
+                self._debug_log(f"ZFS存储池 {pool_name} scrub操作启动成功")
+                return True
+            else:
+                self.logger.error(f"ZFS存储池 {pool_name} scrub操作失败: {result}")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"执行ZFS存储池 {pool_name} scrub操作时出错: {str(e)}", exc_info=True)
+            return False
 
 class UPSDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, config, main_coordinator):

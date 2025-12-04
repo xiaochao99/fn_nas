@@ -426,7 +426,7 @@ class DiskManager:
             [
                 r"Device Model:\s*(.+)",
                 r"Model(?: Family)?\s*:\s*(.+)",
-                r"Model\s*Number:\s*(.+)",
+                r"Model Number:\s*(.+)",
                 r"Product:\s*(.+)",  # NVMe格式
                 r"Model Number:\s*(.+)",  # NVMe格式
             ]
@@ -444,10 +444,10 @@ class DiskManager:
         
         # 容量 - 增强NVMe支持并转换为GB/TB格式
         capacity_patterns = [
-            r"User Capacity:\s*([^[]+)",
-            r"Namespace 1 Size/Capacity:\s*([^[]+)",  # NVMe格式
-            r"Total NVM Capacity:\s*([^[]+)",  # NVMe格式
-            r"Capacity:\s*([^[]+)",  # NVMe格式
+            r"User Capacity:\s*([^\[]+)",
+            r"Namespace 1 Size/Capacity:\s*([^\[]+)",  # NVMe格式
+            r"Total NVM Capacity:\s*([^\[]+)",  # NVMe格式
+            r"Capacity:\s*([^\[]+)",  # NVMe格式
         ]
         
         raw_capacity = self.extract_value(info_output, capacity_patterns)
@@ -651,7 +651,7 @@ class DiskManager:
         # 添加额外属性：温度历史记录
         temp_history = {}
         # 提取属性194的温度历史
-        temp194_match = re.search(r"194\s+Temperature_Celsius+.*?\(\s*([\d\s]+)$", data_output)
+        temp194_match = re.search(r"194\s+Temperature_Celsius+.*?(\s*[\d\s]+)$", data_output)
         if temp194_match:
             try:
                 values = [int(x) for x in temp194_match.group(1).split()]
@@ -667,3 +667,198 @@ class DiskManager:
         
         # 保存额外属性
         disk_info["attributes"] = temp_history
+    
+    async def get_zpools(self) -> list[dict]:
+        """获取ZFS存储池信息"""
+        zpools = []
+        try:
+            self.logger.debug("Fetching ZFS pool list...")
+            # 使用zpool list获取存储池信息（包含所有字段）
+            zpool_output = await self.coordinator.run_command("zpool list 2>/dev/null || echo 'NO_ZPOOL'")
+            self.logger.debug("zpool list output: %s", zpool_output)
+            
+            if "NO_ZPOOL" in zpool_output or "command not found" in zpool_output.lower():
+                self.logger.info("系统未安装ZFS或没有ZFS存储池")
+                return []
+            
+            # 解析zpool list输出
+            lines = zpool_output.splitlines()
+            # 跳过标题行，从第二行开始解析
+            for line in lines[1:]:  # 跳过第一行标题
+                if line.strip():
+                    # 分割制表符或连续空格
+                    parts = re.split(r'\s+', line.strip())
+                    if len(parts) >= 11:  # 根据实际输出有11个字段
+                        pool_info = {
+                            "name": parts[0],
+                            "size": parts[1],
+                            "alloc": parts[2],
+                            "free": parts[3],
+                            "ckpoint": parts[4] if parts[4] != "-" else "",
+                            "expand_sz": parts[5] if parts[5] != "-" else "",
+                            "frag": parts[6] if parts[6] != "-" else "0%",
+                            "capacity": parts[7],
+                            "dedup": parts[8],
+                            "health": parts[9],
+                            "altroot": parts[10] if parts[10] != "-" else ""
+                        }
+                        
+                        zpools.append(pool_info)
+                        self.logger.debug("Found ZFS pool: %s", pool_info["name"])
+            
+            self.logger.info("Found %d ZFS pools", len(zpools))
+            return zpools
+            
+        except Exception as e:
+            self.logger.error("Failed to get ZFS pool info: %s", str(e), exc_info=True)
+            return []
+    
+    async def get_zpool_status(self, pool_name: str) -> dict:
+        """获取ZFS存储池的详细状态信息，包括scrub进度"""
+        try:
+            self.logger.debug(f"Getting ZFS pool status for {pool_name}")
+            status_output = await self.coordinator.run_command(f"zpool status {pool_name} 2>/dev/null || echo 'NO_POOL'")
+            
+            if "NO_POOL" in status_output or "command not found" in status_output.lower():
+                self.logger.debug(f"ZFS pool {pool_name} not found")
+                return {"scrub_in_progress": False}
+            
+            # 解析scrub信息
+            scrub_info = self._parse_scrub_info(status_output)
+            return scrub_info
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get ZFS pool status for {pool_name}: {str(e)}", exc_info=True)
+            return {"scrub_in_progress": False}
+    
+    def _parse_scrub_info(self, status_output: str) -> dict:
+        """解析zpool status中的scrub信息"""
+        scrub_info = {
+            "scrub_in_progress": False,
+            "scrub_status": "无检查",
+            "scrub_progress": "0%",
+            "scan_rate": "0/s",
+            "time_remaining": "",
+            "scanned": "0",
+            "issued": "0", 
+            "repaired": "0",
+            "scrub_start_time": ""
+        }
+        
+        lines = status_output.split('\n')
+        has_scan_section = False
+        
+        # 首先判断是否有scan段（这是判断scrub进行中的关键）
+        for line in lines:
+            line = line.strip()
+            if line.startswith('scan:'):
+                has_scan_section = True
+                break
+        
+        # 如果没有scan段，直接返回无检查状态
+        if not has_scan_section:
+            return scrub_info
+        
+        # 解析scan段的内容
+        in_scan_section = False
+        for line in lines:
+            line = line.strip()
+            
+            # 检查是否进入scan部分
+            if line.startswith('scan:'):
+                in_scan_section = True
+                scrub_info["scrub_in_progress"] = True  # 有scan段就表示在进行中
+                scan_line = line[5:].strip()  # 去掉'scan:'
+                
+                # 检查scrub具体状态
+                if 'scrub in progress' in scan_line or 'scrub resilvering' in scan_line:
+                    scrub_info["scrub_status"] = "检查进行中"
+                    scrub_info["scrub_progress"] = "0.1%"  # 刚开始，显示微小进度表示进行中
+                    
+                    # 解析开始时间
+                    if 'since' in scan_line:
+                        time_part = scan_line.split('since')[-1].strip()
+                        scrub_info["scrub_start_time"] = time_part
+                
+                elif 'scrub repaired' in scan_line or 'scrub completed' in scan_line:
+                    scrub_info["scrub_status"] = "检查完成"
+                    scrub_info["scrub_in_progress"] = False
+                elif 'scrub canceled' in scan_line:
+                    scrub_info["scrub_status"] = "检查已取消"
+                    scrub_info["scrub_in_progress"] = False
+                elif 'scrub paused' in scan_line:
+                    scrub_info["scrub_status"] = "检查已暂停"
+                    scrub_info["scrub_in_progress"] = False
+                else:
+                    # 有scan段但没有具体状态说明，默认为进行中
+                    scrub_info["scrub_status"] = "检查进行中"
+                    scrub_info["scrub_progress"] = "0.1%"
+                
+                continue
+            
+            # 如果在scan部分，解析详细信息
+            if in_scan_section and line and not line.startswith('config'):
+                # 解析进度信息，例如: "2.10T / 2.10T scanned, 413G / 2.10T issued at 223M/s"
+                if 'scanned' in line and 'issued' in line:
+                    parts = line.split(',')
+                    
+                    # 解析扫描进度
+                    if len(parts) >= 1:
+                        scanned_part = parts[0].strip()
+                        if ' / ' in scanned_part:
+                            scanned_data = scanned_part.split(' / ')[0].strip()
+                            total_data = scanned_part.split(' / ')[1].split()[0].strip()
+                            scrub_info["scanned"] = f"{scanned_data}/{total_data}"
+                    
+                    # 解析发出的数据
+                    if len(parts) >= 2:
+                        issued_part = parts[1].strip()
+                        if ' / ' in issued_part:
+                            issued_data = issued_part.split(' / ')[0].strip()
+                            total_issued = issued_part.split(' / ')[1].split()[0].strip()
+                            scrub_info["issued"] = f"{issued_data}/{total_issued}"
+                    
+                    # 解析扫描速度
+                    if 'at' in line:
+                        speed_part = line.split('at')[-1].strip().split()[0]
+                        scrub_info["scan_rate"] = speed_part
+                
+                # 解析进度百分比和剩余时间
+                elif '%' in line and 'done' in line:
+                    # 例如: "644M repaired, 19.23% done, 02:12:38 to go"
+                    if '%' in line:
+                        progress_match = re.search(r'(\d+\.?\d*)%', line)
+                        if progress_match:
+                            scrub_info["scrub_progress"] = f"{progress_match.group(1)}%"
+                    
+                    if 'repaired' in line:
+                        repaired_match = re.search(r'([\d.]+[KMGT]?).*repaired', line)
+                        if repaired_match:
+                            scrub_info["repaired"] = repaired_match.group(1)
+                    
+                    if 'to go' in line:
+                        time_match = re.search(r'(\d{2}:\d{2}:\d{2})\s+to\s+go', line)
+                        if time_match:
+                            scrub_info["time_remaining"] = time_match.group(1)
+                
+                # 如果遇到空行或新章节，退出scan部分
+                elif line == '' or line.startswith('config'):
+                    break
+        
+        return scrub_info
+    
+    def _format_bytes(self, bytes_value: int) -> str:
+        """将字节数格式化为易读的格式"""
+        try:
+            if bytes_value >= 1024**4:  # 1 TB
+                return f"{bytes_value / (1024**4):.1f} TB"
+            elif bytes_value >= 1024**3:  # 1 GB
+                return f"{bytes_value / (1024**3):.1f} GB"
+            elif bytes_value >= 1024**2:  # 1 MB
+                return f"{bytes_value / (1024**2):.1f} MB"
+            elif bytes_value >= 1024:  # 1 KB
+                return f"{bytes_value / 1024:.1f} KB"
+            else:
+                return f"{bytes_value} B"
+        except Exception:
+            return f"{bytes_value} B"

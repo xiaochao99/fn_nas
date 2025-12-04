@@ -6,7 +6,13 @@ from .const import (
     DOMAIN, HDD_TEMP, HDD_STATUS, SYSTEM_INFO, ICON_DISK, 
     ICON_TEMPERATURE, ATTR_DISK_MODEL, ATTR_SERIAL_NO,
     ATTR_POWER_ON_HOURS, ATTR_TOTAL_CAPACITY, ATTR_HEALTH_STATUS,
-    DEVICE_ID_NAS, DATA_UPDATE_COORDINATOR
+    DEVICE_ID_NAS, DATA_UPDATE_COORDINATOR, ZFS_POOL, ICON_ZFS,
+    ATTR_ZPOOL_NAME, ATTR_ZPOOL_HEALTH, ATTR_ZPOOL_SIZE,
+    ATTR_ZPOOL_ALLOC, ATTR_ZPOOL_FREE, ATTR_ZPOOL_CAPACITY,
+    ATTR_ZPOOL_FRAGMENTATION, ATTR_ZPOOL_CKPOINT, ATTR_ZPOOL_EXPANDSZ,
+    ATTR_ZPOOL_DEDUP, ATTR_ZPOOL_SCRUB_STATUS, ATTR_ZPOOL_SCRUB_PROGRESS,
+    ATTR_ZPOOL_SCRUB_SCAN_RATE, ATTR_ZPOOL_SCRUB_TIME_REMAINING,
+    ATTR_ZPOOL_SCRUB_ISSUED, ATTR_ZPOOL_SCRUB_REPAIRED, DEVICE_ID_ZFS
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -229,6 +235,77 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                     )
                     existing_ids.add(sensor_uid)
     
+    # 添加ZFS存储池传感器
+    if "zpools" in coordinator.data:
+        for zpool in coordinator.data["zpools"]:
+            safe_name = zpool["name"].replace(" ", "_").replace("/", "_").replace(".", "_")
+            
+            # ZFS存储池健康状态传感器
+            health_uid = f"{config_entry.entry_id}_zpool_{safe_name}_health"
+            if health_uid not in existing_ids:
+                entities.append(
+                    ZFSPoolSensor(
+                        coordinator,
+                        zpool["name"],
+                        "health",
+                        f"ZFS {zpool['name']} 健康状态",
+                        health_uid,
+                        None,
+                        ICON_ZFS,
+                        zpool
+                    )
+                )
+                existing_ids.add(health_uid)
+            
+            # ZFS存储池容量使用率传感器
+            capacity_uid = f"{config_entry.entry_id}_zpool_{safe_name}_capacity"
+            if capacity_uid not in existing_ids:
+                entities.append(
+                    ZFSPoolSensor(
+                        coordinator,
+                        zpool["name"],
+                        "capacity",
+                        f"ZFS {zpool['name']} 使用率",
+                        capacity_uid,
+                        "%",
+                        ICON_ZFS,
+                        zpool,
+                        device_class=SensorDeviceClass.POWER_FACTOR,
+                        state_class=SensorStateClass.MEASUREMENT
+                    )
+                )
+                existing_ids.add(capacity_uid)
+            
+            # ZFS存储池总大小传感器
+            size_uid = f"{config_entry.entry_id}_zpool_{safe_name}_size"
+            if size_uid not in existing_ids:
+                entities.append(
+                    ZFSPoolSensor(
+                        coordinator,
+                        zpool["name"],
+                        "size",
+                        f"ZFS {zpool['name']} 容量",
+                        size_uid,
+                        None,  # 动态确定单位
+                        ICON_ZFS,
+                        zpool
+                    )
+                )
+                existing_ids.add(size_uid)
+            
+            # ZFS存储池scrub进度传感器
+            scrub_uid = f"{config_entry.entry_id}_zpool_{safe_name}_scrub"
+            if scrub_uid not in existing_ids:
+                entities.append(
+                    ZFSScrubSensor(
+                        coordinator,
+                        zpool["name"],
+                        f"ZFS {zpool['name']} 检查进度",
+                        scrub_uid
+                    )
+                )
+                existing_ids.add(scrub_uid)
+    
     # 添加剩余内存传感器
     mem_available_uid = f"{config_entry.entry_id}_memory_available"
     if mem_available_uid not in existing_ids:
@@ -309,6 +386,28 @@ class DiskSensor(CoordinatorEntity, SensorEntity):
         if self.sensor_type == HDD_TEMP:
             return SensorDeviceClass.TEMPERATURE
         return None
+    
+    @property
+    def native_unit_of_measurement(self):
+        """动态返回单位（仅对size类型传感器）"""
+        if self.sensor_type != "size":
+            return self._attr_native_unit_of_measurement
+        
+        # 对于size类型传感器，根据实际数据确定单位
+        for zpool in self.coordinator.data.get("zpools", []):
+            if zpool["name"] == self.zpool_name:
+                size_str = zpool.get("size", "")
+                if size_str.endswith("T") or size_str.endswith("Ti"):
+                    return "TB"
+                elif size_str.endswith("G") or size_str.endswith("Gi"):
+                    return "GB"
+                elif size_str.endswith("M") or size_str.endswith("Mi"):
+                    return "MB"
+                elif size_str.endswith("K") or size_str.endswith("Ki"):
+                    return "KB"
+                else:
+                    return "GB"  # 默认单位
+        return "GB"  # 默认单位
     
     @property
     def extra_state_attributes(self):
@@ -584,6 +683,28 @@ class MemoryAvailableSensor(CoordinatorEntity, SensorEntity):
             return None
     
     @property
+    def native_unit_of_measurement(self):
+        """动态返回单位（仅对size类型传感器）"""
+        if self.sensor_type != "size":
+            return self._attr_native_unit_of_measurement
+        
+        # 对于size类型传感器，根据实际数据确定单位
+        for zpool in self.coordinator.data.get("zpools", []):
+            if zpool["name"] == self.zpool_name:
+                size_str = zpool.get("size", "")
+                if size_str.endswith("T") or size_str.endswith("Ti"):
+                    return "TB"
+                elif size_str.endswith("G") or size_str.endswith("Gi"):
+                    return "GB"
+                elif size_str.endswith("M") or size_str.endswith("Mi"):
+                    return "MB"
+                elif size_str.endswith("K") or size_str.endswith("Ki"):
+                    return "KB"
+                else:
+                    return "GB"  # 默认单位
+        return "GB"  # 默认单位
+    
+    @property
     def extra_state_attributes(self):
         """返回总内存和已用内存（GB）以及原始字节值"""
         system_data = self.coordinator.data.get("system", {})
@@ -673,6 +794,158 @@ class VolumeAvailableSensor(CoordinatorEntity, SensorEntity):
             "已用容量": vol_info.get("used", "未知"),
             "使用率": vol_info.get("use_percent", "未知")
         }
+
+class ZFSPoolSensor(CoordinatorEntity, SensorEntity):
+    """ZFS存储池传感器"""
+    
+    def __init__(self, coordinator, zpool_name, sensor_type, name, unique_id, unit, icon, zpool_info, device_class=None, state_class=None):
+        super().__init__(coordinator)
+        self.zpool_name = zpool_name
+        self.sensor_type = sensor_type
+        self._attr_name = name
+        self._attr_unique_id = unique_id
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+        self.zpool_info = zpool_info
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, DEVICE_ID_ZFS)},
+            "name": "ZFS存储池",
+            "via_device": (DOMAIN, DEVICE_ID_NAS)
+        }
         
+        # 设置设备类和状态类（如果提供）
+        if device_class:
+            self._attr_device_class = device_class
+        if state_class:
+            self._attr_state_class = state_class
+    
+    @property
+    def native_value(self):
+        """返回传感器的值"""
+        for zpool in self.coordinator.data.get("zpools", []):
+            if zpool["name"] == self.zpool_name:
+                if self.sensor_type == "health":
+                    # 健康状态中英文映射
+                    health_map = {
+                        "ONLINE": "在线",
+                        "DEGRADED": "降级",
+                        "FAULTED": "故障",
+                        "OFFLINE": "离线",
+                        "REMOVED": "已移除",
+                        "UNAVAIL": "不可用"
+                    }
+                    return health_map.get(zpool.get("health", "UNKNOWN"), zpool.get("health", "未知"))
+                elif self.sensor_type == "capacity":
+                    # 返回使用率数值（去掉百分号）
+                    capacity = zpool.get("capacity", "0%")
+                    try:
+                        return float(capacity.replace("%", ""))
+                    except ValueError:
+                        return None
+                elif self.sensor_type == "size":
+                    # 返回总大小的数值部分
+                    size = zpool.get("size", "0")
+                    try:
+                        # 提取数字部分
+                        import re
+                        match = re.search(r'([\d.]+)', size)
+                        if match:
+                            return float(match.group(1))
+                        return None
+                    except (ValueError, AttributeError):
+                        return None
+        return None
+    
+    @property
+    def native_unit_of_measurement(self):
+        """动态返回单位（仅对size类型传感器）"""
+        if self.sensor_type != "size":
+            return self._attr_native_unit_of_measurement
         
-        return attributes
+        # 对于size类型传感器，根据实际数据确定单位
+        for zpool in self.coordinator.data.get("zpools", []):
+            if zpool["name"] == self.zpool_name:
+                size_str = zpool.get("size", "")
+                if size_str.endswith("T") or size_str.endswith("Ti"):
+                    return "TB"
+                elif size_str.endswith("G") or size_str.endswith("Gi"):
+                    return "GB"
+                elif size_str.endswith("M") or size_str.endswith("Mi"):
+                    return "MB"
+                elif size_str.endswith("K") or size_str.endswith("Ki"):
+                    return "KB"
+                else:
+                    return "GB"  # 默认单位
+        return "GB"  # 默认单位
+    
+    @property
+    def extra_state_attributes(self):
+        """返回额外的状态属性"""
+        for zpool in self.coordinator.data.get("zpools", []):
+            if zpool["name"] == self.zpool_name:
+                return {
+                    ATTR_ZPOOL_NAME: zpool.get("name", "未知"),
+                    ATTR_ZPOOL_HEALTH: zpool.get("health", "未知"),
+                    ATTR_ZPOOL_SIZE: zpool.get("size", "未知"),
+                    ATTR_ZPOOL_ALLOC: zpool.get("alloc", "未知"),
+                    ATTR_ZPOOL_FREE: zpool.get("free", "未知"),
+                    ATTR_ZPOOL_CAPACITY: zpool.get("capacity", "未知"),
+                    ATTR_ZPOOL_FRAGMENTATION: zpool.get("frag", "未知"),
+                    ATTR_ZPOOL_CKPOINT: zpool.get("ckpoint", "") if zpool.get("ckpoint") != "" else "无",
+                    ATTR_ZPOOL_EXPANDSZ: zpool.get("expand_sz", "") if zpool.get("expand_sz") != "" else "无",
+                    ATTR_ZPOOL_DEDUP: zpool.get("dedup", "未知"),
+                    "根路径": zpool.get("altroot", "") if zpool.get("altroot") != "" else "默认"
+                }
+        return {}
+
+class ZFSScrubSensor(CoordinatorEntity, SensorEntity):
+    """ZFS存储池scrub进度传感器"""
+    
+    def __init__(self, coordinator, zpool_name, name, unique_id):
+        super().__init__(coordinator)
+        self.zpool_name = zpool_name
+        self._attr_name = name
+        self._attr_unique_id = unique_id
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_icon = "mdi:progress-check"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, DEVICE_ID_ZFS)},
+            "name": "ZFS存储池",
+            "via_device": (DOMAIN, DEVICE_ID_NAS)
+        }
+        self._attr_device_class = SensorDeviceClass.POWER_FACTOR
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self.scrub_cache = {}
+    
+    @property
+    def native_value(self):
+        """返回scrub进度百分比"""
+        # 获取scrub状态信息
+        scrub_info = self.coordinator.data.get("scrub_status", {}).get(self.zpool_name, {})
+        progress_str = scrub_info.get("scrub_progress", "0%")
+        
+        try:
+            # 提取数字部分
+            if progress_str and progress_str != "0%":
+                return float(progress_str.replace("%", ""))
+            return 0.0
+        except (ValueError, AttributeError):
+            return 0.0
+    
+    @property
+    def extra_state_attributes(self):
+        """返回scrub详细状态信息"""
+        scrub_info = self.coordinator.data.get("scrub_status", {}).get(self.zpool_name, {})
+        
+        return {
+            ATTR_ZPOOL_NAME: self.zpool_name,
+            ATTR_ZPOOL_SCRUB_STATUS: scrub_info.get("scrub_status", "无检查"),
+            ATTR_ZPOOL_SCRUB_PROGRESS: scrub_info.get("scrub_progress", "0%"),
+            ATTR_ZPOOL_SCRUB_SCAN_RATE: scrub_info.get("scan_rate", "0/s"),
+            ATTR_ZPOOL_SCRUB_TIME_REMAINING: scrub_info.get("time_remaining", ""),
+            ATTR_ZPOOL_SCRUB_ISSUED: scrub_info.get("issued", "0"),
+            ATTR_ZPOOL_SCRUB_REPAIRED: scrub_info.get("repaired", "0"),
+            "开始时间": scrub_info.get("scrub_start_time", ""),
+            "扫描数据": scrub_info.get("scanned", "0"),
+            "检查进行中": scrub_info.get("scrub_in_progress", False)
+        }

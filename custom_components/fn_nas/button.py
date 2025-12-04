@@ -3,7 +3,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
-    DOMAIN, DATA_UPDATE_COORDINATOR, DEVICE_ID_NAS, CONF_ENABLE_DOCKER
+    DOMAIN, DATA_UPDATE_COORDINATOR, DEVICE_ID_NAS, CONF_ENABLE_DOCKER, DEVICE_ID_ZFS
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +47,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
                 DockerContainerRestartButton(
                     coordinator, 
                     container["name"],
+                    safe_name,
+                    config_entry.entry_id
+                )
+            )
+    
+    # 4. 添加ZFS存储池scrub按钮
+    if "zpools" in coordinator.data:
+        for zpool in coordinator.data["zpools"]:
+            safe_name = zpool["name"].replace(" ", "_").replace("/", "_").replace(".", "_")
+            entities.append(
+                ZpoolScrubButton(
+                    coordinator, 
+                    zpool["name"],
                     safe_name,
                     config_entry.entry_id
                 )
@@ -215,4 +228,52 @@ class VMDestroyButton(CoordinatorEntity, ButtonEntity):
             "操作类型": "强制关机",
             "警告": "此操作会强制关闭虚拟机，可能导致数据丢失",
             "提示": "仅在虚拟机无法正常关机时使用此功能"
+        }
+
+class ZpoolScrubButton(CoordinatorEntity, ButtonEntity):
+    def __init__(self, coordinator, zpool_name, safe_name, entry_id):
+        super().__init__(coordinator)
+        self.zpool_name = zpool_name
+        self.safe_name = safe_name
+        self._attr_name = f"ZFS {zpool_name} 数据检查"
+        self._attr_unique_id = f"{entry_id}_zpool_{safe_name}_scrub"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, DEVICE_ID_ZFS)},
+            "name": "ZFS存储池",
+            "via_device": (DOMAIN, DEVICE_ID_NAS)
+        }
+        self._attr_icon = "mdi:harddisk-check"
+
+    @property
+    def available(self):
+        """检查按钮是否可用（当scrub进行中时不可点击）"""
+        scrub_status = self.coordinator.data.get("scrub_status", {}).get(self.zpool_name, {})
+        return not scrub_status.get("scrub_in_progress", False)
+
+    async def async_press(self):
+        """执行ZFS存储池数据一致性检查"""
+        try:
+            # 检查是否已经有scrub在进行中
+            scrub_status = self.coordinator.data.get("scrub_status", {}).get(self.zpool_name, {})
+            if scrub_status.get("scrub_in_progress", False):
+                self.coordinator.logger.warning(f"ZFS存储池 {self.zpool_name} 已在进行数据一致性检查")
+                return
+            
+            success = await self.coordinator.scrub_zpool(self.zpool_name)
+            if success:
+                self.coordinator.logger.info(f"ZFS存储池 {self.zpool_name} 数据一致性检查启动成功")
+                # 立即刷新状态以更新按钮状态
+                await self.coordinator.async_request_refresh()
+            else:
+                self.coordinator.logger.error(f"ZFS存储池 {self.zpool_name} 数据一致性检查启动失败")
+        except Exception as e:
+            self.coordinator.logger.error(f"启动ZFS存储池 {self.zpool_name} 数据一致性检查时出错: {str(e)}", exc_info=True)
+    
+    @property
+    def extra_state_attributes(self):
+        return {
+            "存储池名称": self.zpool_name,
+            "操作类型": "数据一致性检查",
+            "说明": "对ZFS存储池执行数据完整性和一致性验证",
+            "提示": "此操作可能需要较长时间完成，建议在低峰期执行"
         }
