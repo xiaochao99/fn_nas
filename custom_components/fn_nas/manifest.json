@@ -1,7 +1,7 @@
 {
   "domain": "fn_nas",
   "name": "飞牛NAS",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "documentation": "https://github.com/xiaochao99/fn_nas",
   "dependencies": [],
   "codeowners": ["@xiaochao99"],

@@ -389,25 +389,8 @@ class DiskSensor(CoordinatorEntity, SensorEntity):
     
     @property
     def native_unit_of_measurement(self):
-        """动态返回单位（仅对size类型传感器）"""
-        if self.sensor_type != "size":
-            return self._attr_native_unit_of_measurement
-        
-        # 对于size类型传感器，根据实际数据确定单位
-        for zpool in self.coordinator.data.get("zpools", []):
-            if zpool["name"] == self.zpool_name:
-                size_str = zpool.get("size", "")
-                if size_str.endswith("T") or size_str.endswith("Ti"):
-                    return "TB"
-                elif size_str.endswith("G") or size_str.endswith("Gi"):
-                    return "GB"
-                elif size_str.endswith("M") or size_str.endswith("Mi"):
-                    return "MB"
-                elif size_str.endswith("K") or size_str.endswith("Ki"):
-                    return "KB"
-                else:
-                    return "GB"  # 默认单位
-        return "GB"  # 默认单位
+        """返回内存单位"""
+        return self._attr_native_unit_of_measurement
     
     @property
     def extra_state_attributes(self):
@@ -684,25 +667,8 @@ class MemoryAvailableSensor(CoordinatorEntity, SensorEntity):
     
     @property
     def native_unit_of_measurement(self):
-        """动态返回单位（仅对size类型传感器）"""
-        if self.sensor_type != "size":
-            return self._attr_native_unit_of_measurement
-        
-        # 对于size类型传感器，根据实际数据确定单位
-        for zpool in self.coordinator.data.get("zpools", []):
-            if zpool["name"] == self.zpool_name:
-                size_str = zpool.get("size", "")
-                if size_str.endswith("T") or size_str.endswith("Ti"):
-                    return "TB"
-                elif size_str.endswith("G") or size_str.endswith("Gi"):
-                    return "GB"
-                elif size_str.endswith("M") or size_str.endswith("Mi"):
-                    return "MB"
-                elif size_str.endswith("K") or size_str.endswith("Ki"):
-                    return "KB"
-                else:
-                    return "GB"  # 默认单位
-        return "GB"  # 默认单位
+        """返回内存单位"""
+        return self._attr_native_unit_of_measurement
     
     @property
     def extra_state_attributes(self):
@@ -858,25 +824,8 @@ class ZFSPoolSensor(CoordinatorEntity, SensorEntity):
     
     @property
     def native_unit_of_measurement(self):
-        """动态返回单位（仅对size类型传感器）"""
-        if self.sensor_type != "size":
-            return self._attr_native_unit_of_measurement
-        
-        # 对于size类型传感器，根据实际数据确定单位
-        for zpool in self.coordinator.data.get("zpools", []):
-            if zpool["name"] == self.zpool_name:
-                size_str = zpool.get("size", "")
-                if size_str.endswith("T") or size_str.endswith("Ti"):
-                    return "TB"
-                elif size_str.endswith("G") or size_str.endswith("Gi"):
-                    return "GB"
-                elif size_str.endswith("M") or size_str.endswith("Mi"):
-                    return "MB"
-                elif size_str.endswith("K") or size_str.endswith("Ki"):
-                    return "KB"
-                else:
-                    return "GB"  # 默认单位
-        return "GB"  # 默认单位
+        """返回内存单位"""
+        return self._attr_native_unit_of_measurement
     
     @property
     def extra_state_attributes(self):
