@@ -29,8 +29,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def async_delayed_setup(hass: HomeAssistant, entry: ConfigEntry, coordinator: FlynasCoordinator):
     try:
-        # 不阻塞等待NAS上线，直接尝试刷新数据
-        await coordinator.async_config_entry_first_refresh()
+        # 检查配置条目状态，只有在 SETUP_IN_PROGRESS 时才调用 async_config_entry_first_refresh
+        from homeassistant.config_entries import ConfigEntryState
+        if entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
+            await coordinator.async_config_entry_first_refresh()
+        else:
+            # 如果配置条目已经加载，则直接刷新数据
+            await coordinator.async_refresh()
         enable_docker = coordinator.config.get(CONF_ENABLE_DOCKER, False)
         if enable_docker:
             from .docker_manager import DockerManager
@@ -40,7 +45,10 @@ async def async_delayed_setup(hass: HomeAssistant, entry: ConfigEntry, coordinat
             coordinator.docker_manager = None
             _LOGGER.debug("未启用Docker容器监控")
         ups_coordinator = UPSDataUpdateCoordinator(hass, coordinator.config, coordinator)
-        await ups_coordinator.async_config_entry_first_refresh()
+        if entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
+            await ups_coordinator.async_config_entry_first_refresh()
+        else:
+            await ups_coordinator.async_refresh()
         hass.data[DOMAIN][entry.entry_id]["ups_coordinator"] = ups_coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         entry.async_on_unload(entry.add_update_listener(async_update_entry))
