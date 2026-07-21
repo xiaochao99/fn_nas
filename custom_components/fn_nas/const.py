@@ -1,77 +1,83 @@
-from homeassistant.const import Platform
+"""Constants for the fn_nas (飞牛NAS) integration.
+
+This integration talks to fnOS exclusively over its WebSocket (WSS) monitoring
+API. Features that fnOS does not expose over WebSocket (UPS, VM, Docker, fan,
+power control, ZFS scrub, sensor temperatures, uptime, MAC/WoL) are intentionally
+out of scope.
+"""
 
 DOMAIN = "fn_nas"
-PLATFORMS = [
-    Platform.SENSOR,
-    Platform.BINARY_SENSOR,
-    Platform.SWITCH,
-    Platform.BUTTON
-]
-
-CONF_HOST = "host"
-CONF_PORT = "port"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
-CONF_ROOT_PASSWORD = "root_password"
-CONF_SSH_KEY = "ssh_key"
-CONF_SCAN_INTERVAL = "scan_interval"
-CONF_FAN_CONFIG_PATH = "fan_config_path"
-CONF_IGNORE_DISKS = "ignore_disks"
-CONF_MAC = "mac"
-CONF_UPS_SCAN_INTERVAL = "ups_scan_interval"
-CONF_ENABLE_DOCKER = "enable_docker"
-DOCKER_CONTAINERS = "docker_containers"
-
-DEFAULT_PORT = 22
-DEFAULT_SCAN_INTERVAL = 60
-DEFAULT_UPS_SCAN_INTERVAL = 30 
-
 DATA_UPDATE_COORDINATOR = "coordinator"
 
-HDD_TEMP = "temperature"
-HDD_HEALTH = "health"
-HDD_STATUS = "status"
-SYSTEM_INFO = "system"
-FAN_SPEED = "fan_speed"
-UPS_INFO = "ups_info"
-ZFS_POOL = "zfs_pool" 
+# Config keys
+CONF_HOST = "host"
+CONF_PORT = "port"
+CONF_SCHEME = "scheme"
+CONF_TLS_INSECURE = "tls_insecure"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
+CONF_SCAN_INTERVAL = "scan_interval"
+CONF_IGNORE_DISKS = "ignore_disks"
 
-ATTR_DISK_MODEL = "硬盘型号"
-ATTR_SERIAL_NO = "序列号"
-ATTR_POWER_ON_HOURS = "通电时间"
-ATTR_TOTAL_CAPACITY = "总容量"
-ATTR_HEALTH_STATUS = "健康状态"
-ATTR_FAN_MODE = "控制模式"
-ATTR_FAN_CONFIG = "配置文件"
+DEFAULT_SCAN_INTERVAL = 30
+DEFAULT_SCHEME = "auto"
 
+# Device identifiers
+DEVICE_ID_NAS = "flynas_nas"
+DEVICE_ID_DISK_PREFIX = "flynas_disk_"
+DEVICE_ID_POOL_PREFIX = "flynas_pool_"
+
+# Icons
+ICON_NAS = "mdi:server"
 ICON_DISK = "mdi:harddisk"
-ICON_FAN = "mdi:fan"
 ICON_TEMPERATURE = "mdi:thermometer"
-ICON_HEALTH = "mdi:heart-pulse"
-ICON_POWER = "mdi:power"
-ICON_RESTART = "mdi:restart"
-ICON_ZFS = "mdi:harddisk-plus"
+ICON_STORAGE = "mdi:database"
+ICON_CPU = "mdi:chip"
+ICON_MEMORY = "mdi:memory"
 
-# 设备标识符常量
-DEVICE_ID_NAS = "flynas_nas_system"
-DEVICE_ID_UPS = "flynas_ups"
-DEVICE_ID_ZFS = "flynas_zfs"
-CONF_NETWORK_MACS = "network_macs"
+# System sensor keys (into coordinator.data["system"])
+SYSTEM_MACHINE_TYPE = "machine_type"
+SYSTEM_CPU_USAGE = "cpu_usage"
+SYSTEM_CPU_CORES = "cpu_cores"
+SYSTEM_MEM_TOTAL = "mem_total"
+SYSTEM_MEM_USED = "mem_used"
+SYSTEM_MEM_USAGE = "mem_usage"
+SYSTEM_STORAGE_TOTAL = "storage_total"
+SYSTEM_STORAGE_FREE = "storage_free"
+SYSTEM_SYS_DISK_TYPE = "sys_disk_type"
 
-# ZFS相关常量
-ATTR_ZPOOL_NAME = "存储池名称"
-ATTR_ZPOOL_HEALTH = "健康状态"
-ATTR_ZPOOL_SIZE = "总大小"
-ATTR_ZPOOL_ALLOC = "已使用"
-ATTR_ZPOOL_FREE = "可用空间"
-ATTR_ZPOOL_CAPACITY = "使用率"
-ATTR_ZPOOL_FRAGMENTATION = "碎片率"
-ATTR_ZPOOL_CKPOINT = "检查点"
-ATTR_ZPOOL_EXPANDSZ = "扩展大小"
-ATTR_ZPOOL_DEDUP = "重复数据删除率"
-ATTR_ZPOOL_SCRUB_STATUS = "检查状态"
-ATTR_ZPOOL_SCRUB_PROGRESS = "检查进度"
-ATTR_ZPOOL_SCRUB_SCAN_RATE = "扫描速度"
-ATTR_ZPOOL_SCRUB_TIME_REMAINING = "剩余时间"
-ATTR_ZPOOL_SCRUB_ISSUED = "已发出数据"
-ATTR_ZPOOL_SCRUB_REPAIRED = "已修复数据"
+# Disk sensor keys (into a disk entry)
+HDD_MODEL = "model"
+HDD_SERIAL = "serial"
+HDD_TEMP = "temp"
+HDD_STATUS = "health"
+HDD_POWER_ON = "power_on_hours"
+HDD_WEAR = "wear_level"
+
+# Pool sensor keys (into a pool entry)
+POOL_SIZE = "size"
+POOL_FREE = "free"
+POOL_USAGE = "usage"
+POOL_LEVEL = "level"
+
+# Attributes
+ATTR_DISK_MODEL = "型号"
+ATTR_DISK_SERIAL = "序列号"
+ATTR_PROTOCOL = "接口协议"
+ATTR_RPM = "转速"
+ATTR_IS_SYSTEM = "系统盘"
+ATTR_POOL_NAME = "存储池名称"
+ATTR_POOL_LEVEL = "RAID 级别"
+ATTR_POOL_MOUNTPOINT = "挂载点"
+ATTR_POOL_UUID = "UUID"
+ATTR_POWER_ON_HOURS = "通电时长(小时)"
+ATTR_HEALTH_STATUS = "健康状态"
+ATTR_TOTAL_CAPACITY = "总容量"
+ATTR_MACHINE_TYPE_RAW = "原始机器类型"
+ATTR_SYS_DISK_TYPE = "系统盘类型"
+ATTR_HDD_COUNT = "机械硬盘数量"
+ATTR_SSD_COUNT = "固态硬盘数量"
+
+# Health status display strings
+HEALTH_GOOD = "良好"
+HEALTH_BAD = "故障"

@@ -1,49 +1,59 @@
 {
   "config": {
-    "title": "飞牛NAS",
     "step": {
       "user": {
-        "title": "登录信息",
+        "title": "飞牛NAS (fnOS) 连接配置",
+        "description": "通过 WebSocket (WSS) 协议连接飞牛 NAS，获取系统、存储与磁盘信息。",
         "data": {
-          "host": "主机名或IP",
-          "port": "端口",
+          "host": "主机地址 (IP 或域名)",
+          "scheme": "连接协议",
+          "port": "端口 (留空自动选择)",
+          "tls_insecure": "跳过 TLS 证书校验 (自签名证书时开启)",
           "username": "用户名",
           "password": "密码",
-          "scan_interval": "数据更新间隔(秒)",
-          "enable_docker": "启用docker控制"
+          "scan_interval": "刷新间隔 (秒)",
+          "ignore_disks": "忽略的磁盘 (逗号分隔, 如 sda,sdb)"
         }
       },
-      "select_mac": {
-        "title": "选择用于网络唤醒的MAC地址",
-        "data": {
-          "mac": "MAC地址"
-        }
+      "reauth": {
+        "title": "重新验证飞牛NAS",
+        "description": "请输入访问凭据。"
       }
-    },
-    "abort": {
-      "already_configured": "设备已配置",
-      "not_found": "设备未找到",
-      "connection_failed": "连接失败",
-      "unknown_error": "未知错误",
-      "sudo_permission_required": "需要sudo权限"
     },
     "error": {
-      "invalid_host": "无效的主机名或IP地址",
-      "cannot_connect": "无法连接到设备",
-      "invalid_auth": "认证失败",
-      "unknown": "未知错误"
+      "cannot_connect": "无法连接到飞牛NAS，请检查地址与端口。",
+      "wrong_scheme": "连接被拒绝 (SSL 错误)。局域网通常使用明文 ws 协议、端口 5666；如选了 wss 请改用 ws，或确认端口正确。",
+      "invalid_auth": "用户名或密码错误。",
+      "unknown": "发生未知错误，请查看日志。"
     },
-    "options": {
-      "step": {
-        "init": {
-          "title": "配置选项",
-          "data": {
-            "ignore_disks": "忽略的磁盘设备(逗号分隔)",
-            "fan_config_path": "风扇配置文件路径",
-            "ups_scan_interval": "UPS更新间隔(秒)"
-          }
-        }
-      }
+    "abort": {
+      "already_configured": "该飞牛NAS已配置。"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "机器类型": { "name": "机器类型" },
+      "CPU使用率": { "name": "CPU使用率" },
+      "CPU核心数": { "name": "CPU核心数" },
+      "内存总量": { "name": "内存总量" },
+      "内存已用": { "name": "内存已用" },
+      "内存使用率": { "name": "内存使用率" },
+      "存储总容量": { "name": "存储总容量" },
+      "存储可用空间": { "name": "存储可用空间" },
+      "系统盘类型": { "name": "系统盘类型" },
+      "型号": { "name": "型号" },
+      "序列号": { "name": "序列号" },
+      "温度": { "name": "温度" },
+      "健康状态": { "name": "健康状态" },
+      "通电时长": { "name": "通电时长" },
+      "寿命消耗": { "name": "寿命消耗" },
+      "容量": { "name": "容量" },
+      "可用": { "name": "可用" },
+      "使用率": { "name": "使用率" },
+      "RAID级别": { "name": "RAID级别" }
+    },
+    "binary_sensor": {
+      "健康状态异常": { "name": "健康状态异常" }
     }
   }
 }

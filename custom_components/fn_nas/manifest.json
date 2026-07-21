@@ -1,11 +1,11 @@
 {
   "domain": "fn_nas",
   "name": "飞牛NAS",
-  "version": "1.4.3",
+  "version": "2.0.0",
   "documentation": "https://github.com/xiaochao99/fn_nas",
   "dependencies": [],
   "codeowners": ["@xiaochao99"],
-  "requirements": ["asyncssh>=2.13.1"],
+  "requirements": [],
   "iot_class": "local_polling",
   "config_flow": true
 }
