@@ -356,6 +356,14 @@ class FnWssClient:
         return await self._raw_call(req, params, signed=True)
 
     async def call(self, req: str, **params: Any) -> dict[str, Any]:
+        """Send a signed business request, transparently recovering from faults.
+
+        Two recoverable conditions are handled:
+        * the server closed the socket (reconnect and retry once), and
+        * the session secret expired/invalid (re-login to refresh the secret and
+          retry once). Without this, a session timeout would make every poll fail
+          after the NAS has been idle for a while.
+        """
         if not self._secret:
             await self._obtain_secret()
             if not self._secret:
@@ -365,9 +373,21 @@ class FnWssClient:
             try:
                 return await self._send_signed(req, params or None)
             except FnWssConnectionClosed:
+                _LOGGER.debug("fnOS WSS: reconnecting for %s", req)
                 return await self._send_signed(req, params or None)
 
-        return await _attempt()
+        try:
+            resp = await _attempt()
+        except FnWssError as err:
+            if err.errno in (65534, 65537) or "认证" in str(err) or "登录" in str(err):
+                _LOGGER.debug(
+                    "fnOS WSS: session error on %s (%s); re-authenticating", req, err
+                )
+                await self._obtain_secret()
+                resp = await _attempt()
+            else:
+                raise
+        return resp
 
     # ── convenience methods ──────────────────────────────────────────────
 
@@ -400,8 +420,34 @@ class FnWssClient:
         - temperature.current, power_on_time.hours
         - smart_status.passed, user_capacity.bytes
         - rotation_rate (0=SSD), device.protocol
+
+        When the disk is in standby/sleep, returns
+        ``{"diskStandby": 1, "result": "succ"}`` with no SMART fields.
         """
         return await self.call("stor.diskSmart", disk=dev_name)
+
+    async def get_disk_info(self, dev_name: str) -> dict[str, Any]:
+        """Get basic disk identity (model, serial, size) even when standby.
+
+        ``stor.diskSmart`` returns only ``diskStandby: 1`` for sleeping disks.
+        ``stor.disk`` is a lighter call that may still provide model/serial
+        without waking the drive.
+        """
+        return await self.call("stor.disk", disk=dev_name)
+
+    _MODEL_KEYS = ("model_name", "model", "device_model", "product", "vendor")
+    _SERIAL_KEYS = ("serial_number", "serial", "sn")
+
+    # Candidate field names in SMART / disk-list responses. The fnOS firmware
+    # is inconsistent across disk types (HDD vs SATA SSD vs NVMe) — the actual
+    # key for "model" / "serial" can vary. Try each in order.
+    _MODEL_KEYS = (
+        "model_name", "model", "model_family", "device_model", "product",
+        "vendor", "manufacturer",
+    )
+    _SERIAL_KEYS = (
+        "serial_number", "serial", "sn", "device_serial",
+    )
 
     async def get_all_disk_info(self) -> list[dict[str, Any]]:
         """Get complete info for all physical disks.
@@ -413,18 +459,30 @@ class FnWssClient:
         disk_list = await self.get_disk_list()
         disks: list[dict[str, Any]] = []
 
+        def _first(source: dict, keys: tuple[str, ...]) -> Any:
+            for k in keys:
+                val = source.get(k)
+                if val:
+                    return val
+            return None
+
         for item in disk_list:
             dev = item.get("name")
             if not dev:
                 continue
 
+            # Fallbacks from the disk list itself, used when SMART is missing
+            # the field (or SMART query fails entirely).
+            list_model = _first(item, self._MODEL_KEYS)
+            list_serial = _first(item, self._SERIAL_KEYS)
+
             entry: dict[str, Any] = {
                 "dev": dev,
                 "name": dev,  # stable internal identifier
-                "display_name": dev,  # will be replaced by serial for display
+                "display_name": list_serial or dev,
                 "temp": item.get("temp"),  # primary: resmon.disk (always works)
-                "model": None,
-                "serial": None,
+                "model": list_model,
+                "serial": list_serial,
                 "size": None,
                 "protocol": None,
                 "smart_ok": None,
@@ -434,16 +492,62 @@ class FnWssClient:
                 "is_system": False,
             }
 
+            smart_resp: dict[str, Any] | None = None
             try:
                 smart_resp = await self.get_disk_smart(dev)
-                smart = smart_resp.get("smart", {}) or smart_resp.get("data", {})
+                # SMART payloads come in two shapes: wrapped in "smart"/"data",
+                # or a bare smartctl JSON with fields at the top level. Fall back
+                # to the whole response so a bare payload (e.g. some SSDs) still
+                # yields model_name / serial_number.
+                smart = (
+                    smart_resp.get("smart")
+                    or smart_resp.get("data")
+                    or smart_resp
+                ) or {}
 
-                serial = smart.get("serial_number")
-                entry["serial"] = serial
-                # Use serial for display name; fallback to dev
-                entry["display_name"] = serial or dev
+                serial = _first(smart, self._SERIAL_KEYS)
+                if serial:
+                    entry["serial"] = serial
+                    entry["display_name"] = serial
 
-                entry["model"] = smart.get("model_name")
+                smart_model = _first(smart, self._MODEL_KEYS)
+                if smart_model:
+                    entry["model"] = smart_model
+
+                # Disk in standby returns ``{diskStandby:1, result:"succ"}``
+                # with no SMART fields at all. Try a lighter API that may still
+                # give model / serial / size without waking the drive.
+                if (
+                    smart is smart_resp
+                    and smart_resp.get("diskStandby") == 1
+                    and not (smart_model and serial)
+                ):
+                    _LOGGER.debug("fnOS disk %s is in standby; trying stor.disk", dev)
+                    try:
+                        info_resp = await self.get_disk_info(dev)
+                        info = (
+                            info_resp.get("data")
+                            or info_resp.get("disk")
+                            or info_resp
+                        ) or {}
+                        if not smart_model:
+                            smart_model = _first(info, self._MODEL_KEYS)
+                            if smart_model:
+                                entry["model"] = smart_model
+                        if not serial:
+                            serial = _first(info, self._SERIAL_KEYS)
+                            if serial:
+                                entry["serial"] = serial
+                                entry["display_name"] = serial
+                        # May also provide size
+                        if entry["size"] is None:
+                            cap = info.get("size") or info.get("capacity")
+                            if isinstance(cap, (int, float)):
+                                entry["size"] = cap
+                    except FnWssError as err:
+                        _LOGGER.debug(
+                            "fnOS disk %s stor.disk fallback also failed: %s", dev, err
+                        )
 
                 capacity = smart.get("user_capacity")
                 if isinstance(capacity, dict):
@@ -492,7 +596,36 @@ class FnWssClient:
                                 break
 
             except FnWssError as err:
-                _LOGGER.warning("fnOS SMART query failed for %s: %s", dev, err)
+                _LOGGER.warning(
+                    "fnOS SMART query FAILED for %s: %s  "
+                    "(resmon item keys: %s)",
+                    dev,
+                    err,
+                    sorted(item.keys()) if isinstance(item, dict) else None,
+                )
+            else:
+                missing = []
+                if not entry.get("model"):
+                    missing.append("model")
+                if not entry.get("serial"):
+                    missing.append("serial")
+                if missing:
+                    is_standby = (
+                        smart is smart_resp
+                        and isinstance(smart_resp, dict)
+                        and smart_resp.get("diskStandby") == 1
+                    )
+                    _LOGGER.log(
+                        logging.DEBUG if is_standby else logging.WARNING,
+                        "fnOS disk %s %s missing %s; "
+                        "smart keys=%s  resmon keys=%s  smart_resp=%s",
+                        dev,
+                        "(standby)" if is_standby else "SMART ok but",
+                        ", ".join(missing),
+                        sorted(smart.keys()) if isinstance(smart, dict) else None,
+                        sorted(item.keys()) if isinstance(item, dict) else None,
+                        smart_resp,
+                    )
 
             disks.append(entry)
 

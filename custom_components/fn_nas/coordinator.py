@@ -76,6 +76,10 @@ class FlynasCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"fnOS WSS 错误: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"获取 fnOS 数据失败: {err}") from err
+        finally:
+            # Drop the socket so the next poll starts fresh; the NAS may close
+            # idle connections, and reusing a stale one causes silent failures.
+            await self.wss.close()
 
         disks = [d for d in disks if d["name"] not in self.ignore_disks]
         pools = self._parse_pools(overview)
