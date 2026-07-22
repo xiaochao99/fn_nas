@@ -56,6 +56,7 @@ from .const import (
     POOL_SIZE,
     POOL_USAGE,
     SYSTEM_CPU_CORES,
+    SYSTEM_CPU_TEMP,
     SYSTEM_CPU_USAGE,
     SYSTEM_MACHINE_TYPE,
     SYSTEM_MEM_TOTAL,
@@ -96,6 +97,14 @@ SYSTEM_SENSORS = [
         "key": SYSTEM_CPU_CORES,
         "name": "CPU核心数",
         "icon": ICON_CPU,
+        "state_class": SensorStateClass.MEASUREMENT,
+    },
+    {
+        "key": SYSTEM_CPU_TEMP,
+        "name": "CPU温度",
+        "icon": ICON_TEMPERATURE,
+        "unit": UnitOfTemperature.CELSIUS,
+        "device_class": SensorDeviceClass.TEMPERATURE,
         "state_class": SensorStateClass.MEASUREMENT,
     },
     {

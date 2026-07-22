@@ -25,6 +25,7 @@ from .const import (
     SYSTEM_MACHINE_TYPE,
     SYSTEM_CPU_USAGE,
     SYSTEM_CPU_CORES,
+    SYSTEM_CPU_TEMP,
     SYSTEM_MEM_TOTAL,
     SYSTEM_MEM_USED,
     SYSTEM_MEM_USAGE,
@@ -102,6 +103,9 @@ class FlynasCoordinator(DataUpdateCoordinator):
         cpu_data = cpu.get("data", {}).get("cpu", {}) or cpu.get("cpu", {})
         cpu_usage = cpu_data.get("busy", {}).get("all") if isinstance(cpu_data.get("busy"), dict) else cpu_data.get("usage")
         cpu_cores = cpu_data.get("core") or cpu_data.get("cores")
+        # temp is an array, e.g. [48] for a single-sensor CPU
+        cpu_temp_arr = cpu_data.get("temp", [])
+        cpu_temp = cpu_temp_arr[0] if cpu_temp_arr else None
 
         # Response structure: resp["data"]["mem"] and resp["data"]["swap"]
         mem_data = mem.get("data", {}).get("mem", {}) or mem.get("mem", {})
@@ -116,6 +120,7 @@ class FlynasCoordinator(DataUpdateCoordinator):
             SYSTEM_MACHINE_TYPE: machine_type,
             SYSTEM_CPU_USAGE: cpu_usage,
             SYSTEM_CPU_CORES: cpu_cores,
+            SYSTEM_CPU_TEMP: cpu_temp,
             SYSTEM_MEM_TOTAL: mem_total,
             SYSTEM_MEM_USED: mem_used,
             SYSTEM_MEM_USAGE: round(mem_used / mem_total * 100, 1) if mem_total else None,
