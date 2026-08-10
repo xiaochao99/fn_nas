@@ -6,13 +6,52 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
-from .const import DATA_UPDATE_COORDINATOR, DOMAIN
+from .const import (
+    DATA_UPDATE_COORDINATOR,
+    DEVICE_ID_DISK_PREFIX,
+    DEVICE_ID_NAS,
+    DEVICE_ID_POOL_PREFIX,
+    DOMAIN,
+)
 from .coordinator import FlynasCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS = ["sensor", "binary_sensor", "button"]
+
+
+def _is_legacy_device_identifier(identifier: str) -> bool:
+    return identifier == DEVICE_ID_NAS or identifier.startswith(
+        (DEVICE_ID_DISK_PREFIX, DEVICE_ID_POOL_PREFIX)
+    )
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Scope device identifiers created before config entry version 3."""
+    if entry.version < 3:
+        device_registry = dr.async_get(hass)
+        for device in dr.async_entries_for_config_entry(
+            device_registry, entry.entry_id
+        ):
+            identifiers = {
+                (
+                    domain,
+                    f"{entry.entry_id}_{identifier}"
+                    if domain == DOMAIN and _is_legacy_device_identifier(identifier)
+                    else identifier,
+                )
+                for domain, identifier in device.identifiers
+            }
+            if identifiers != device.identifiers:
+                device_registry.async_update_device(
+                    device.id, new_identifiers=identifiers
+                )
+
+        hass.config_entries.async_update_entry(entry, version=3)
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

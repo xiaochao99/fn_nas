@@ -2,8 +2,7 @@
 
 This integration talks to fnOS exclusively over its WebSocket (WSS) monitoring
 API. Features that fnOS does not expose over WebSocket (UPS, VM, Docker, fan,
-power control, ZFS scrub, sensor temperatures, uptime, MAC/WoL) are intentionally
-out of scope.
+ZFS scrub, sensor temperatures, uptime, MAC/WoL) are intentionally out of scope.
 """
 
 DOMAIN = "fn_nas"
@@ -34,6 +33,8 @@ ICON_TEMPERATURE = "mdi:thermometer"
 ICON_STORAGE = "mdi:database"
 ICON_CPU = "mdi:chip"
 ICON_MEMORY = "mdi:memory"
+ICON_RESTART = "mdi:restart"
+ICON_POWEROFF = "mdi:power"
 
 # System sensor keys (into coordinator.data["system"])
 SYSTEM_MACHINE_TYPE = "machine_type"

@@ -166,7 +166,7 @@ class FlynasSystemSensor(CoordinatorEntity, SensorEntity):
         if self._gb:
             self._attr_device_class = SensorDeviceClass.DATA_SIZE
             self._attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-        self._attr_device_info = _nas_device_info(coordinator)
+        self._attr_device_info = _nas_device_info(coordinator, entry_id)
 
     @property
     def native_value(self) -> Any:
@@ -260,7 +260,7 @@ class FlynasDiskSensor(CoordinatorEntity, SensorEntity):
             self._attr_state_class = spec["state_class"]
         if spec.get("diagnostic"):
             self._attr_entity_registry_enabled_default = False
-        self._attr_device_info = _disk_device_info(disk)
+        self._attr_device_info = _disk_device_info(disk, entry_id)
 
     def _disk(self) -> dict | None:
         return next(
@@ -351,7 +351,7 @@ class FlynasPoolSensor(CoordinatorEntity, SensorEntity):
             self._attr_native_unit_of_measurement = spec["unit"]
         if spec.get("state_class"):
             self._attr_state_class = spec["state_class"]
-        self._attr_device_info = _pool_device_info(pool)
+        self._attr_device_info = _pool_device_info(pool, entry_id)
 
     def _pool(self) -> dict | None:
         return next(
@@ -385,34 +385,47 @@ class FlynasPoolSensor(CoordinatorEntity, SensorEntity):
 
 # ── Device info helpers ───────────────────────────────────────────────────
 
-def _nas_device_info(coordinator: FlynasCoordinator):
+def _device_identifier(entry_id: str, device_id: str) -> tuple[str, str]:
+    """Return an identifier scoped to one config entry."""
+    return (DOMAIN, f"{entry_id}_{device_id}")
+
+
+def _nas_device_info(coordinator: FlynasCoordinator, entry_id: str):
     host = coordinator.config[CONF_HOST]
     return {
-        "identifiers": {(DOMAIN, DEVICE_ID_NAS)},
+        "identifiers": {_device_identifier(entry_id, DEVICE_ID_NAS)},
         "name": f"飞牛NAS ({host})",
         "manufacturer": "飞牛 fnOS",
         "model": coordinator.data["system"].get(SYSTEM_MACHINE_TYPE),
     }
 
 
-def _disk_device_info(disk: dict):
+def _disk_device_info(disk: dict, entry_id: str):
     dev = disk.get("dev", "")
     display = disk.get("display_name", disk.get("name", dev))
     return {
-        "identifiers": {(DOMAIN, f"{DEVICE_ID_DISK_PREFIX}{disk['name']}")},
+        "identifiers": {
+            _device_identifier(
+                entry_id, f"{DEVICE_ID_DISK_PREFIX}{disk['name']}"
+            )
+        },
         "name": f"磁盘 {display}",
         "model": disk.get("model") or dev,
         "manufacturer": disk.get("protocol"),
-        "via_device": (DOMAIN, DEVICE_ID_NAS),
+        "via_device": _device_identifier(entry_id, DEVICE_ID_NAS),
     }
 
 
-def _pool_device_info(pool: dict):
+def _pool_device_info(pool: dict, entry_id: str):
     return {
-        "identifiers": {(DOMAIN, f"{DEVICE_ID_POOL_PREFIX}{pool['uuid']}")},
+        "identifiers": {
+            _device_identifier(
+                entry_id, f"{DEVICE_ID_POOL_PREFIX}{pool['uuid']}"
+            )
+        },
         "name": f"存储池 {pool.get('name')}",
         "model": pool.get("level"),
-        "via_device": (DOMAIN, DEVICE_ID_NAS),
+        "via_device": _device_identifier(entry_id, DEVICE_ID_NAS),
     }
 
 

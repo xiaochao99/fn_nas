@@ -15,8 +15,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_HEALTH_STATUS,
-    DEVICE_ID_DISK_PREFIX,
-    DEVICE_ID_NAS,
     DOMAIN,
     HEALTH_BAD,
     HEALTH_GOOD,
@@ -40,7 +38,7 @@ class FlynasDiskHealthBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_name = "健康状态异常"
         self._attr_icon = ICON_DISK
         self._attr_unique_id = f"{entry_id}_disk_{self._disk_name}_health_problem"
-        self._attr_device_info = _disk_device_info(disk)
+        self._attr_device_info = _disk_device_info(disk, entry_id)
 
     def _disk(self) -> dict | None:
         return next(

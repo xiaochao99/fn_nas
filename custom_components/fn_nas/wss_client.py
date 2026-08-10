@@ -355,11 +355,17 @@ class FnWssClient:
                 await self._obtain_secret()
         return await self._raw_call(req, params, signed=True)
 
-    async def call(self, req: str, **params: Any) -> dict[str, Any]:
+    async def call(
+        self,
+        req: str,
+        *,
+        retry_on_disconnect: bool = True,
+        **params: Any,
+    ) -> dict[str, Any]:
         """Send a signed business request, transparently recovering from faults.
 
         Two recoverable conditions are handled:
-        * the server closed the socket (reconnect and retry once), and
+        * the server closed the socket (reconnect and retry once by default), and
         * the session secret expired/invalid (re-login to refresh the secret and
           retry once). Without this, a session timeout would make every poll fail
           after the NAS has been idle for a while.
@@ -373,6 +379,8 @@ class FnWssClient:
             try:
                 return await self._send_signed(req, params or None)
             except FnWssConnectionClosed:
+                if not retry_on_disconnect:
+                    raise
                 _LOGGER.debug("fnOS WSS: reconnecting for %s", req)
                 return await self._send_signed(req, params or None)
 
@@ -393,6 +401,14 @@ class FnWssClient:
 
     async def get_system_info(self) -> dict[str, Any]:
         return await self.call("appcgi.sysinfo.getTrimMachineType")
+
+    async def reboot(self) -> dict[str, Any]:
+        """Restart fnOS through the system power-management endpoint."""
+        return await self.call("appcgi.system.reboot", retry_on_disconnect=False)
+
+    async def poweroff(self) -> dict[str, Any]:
+        """Shut down fnOS through the system power-management endpoint."""
+        return await self.call("appcgi.system.poweroff", retry_on_disconnect=False)
 
     async def get_cpu(self) -> dict[str, Any]:
         return await self.call("appcgi.resmon.cpu")
