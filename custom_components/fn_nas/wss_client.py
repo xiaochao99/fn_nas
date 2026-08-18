@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 import ssl
 from typing import Any
@@ -38,6 +39,11 @@ _FNOS_ERRORS = {
     65537: "密码验证失败",
     404: "资源不存在",
     409: "状态冲突",
+    # fnOS refused the power-off. Confirmed device-side rejection: the same
+    # shutdown works via the SSH `poweroff` command, so this is fnOS gating the
+    # appcgi API shutdown (unfinished VM / Docker not stopped / active task / the
+    # API-shutdown policy), not a protocol or signing problem in this client.
+    266240: "关机被设备拒绝（疑似 fnOS 电源策略拦截，或存在未结束的虚拟机/Docker/任务）",
 }
 
 
@@ -193,6 +199,17 @@ class FnWssClient:
             except Exception:
                 pass
             self._ws = None
+        # The HMAC `secret`/`token` are bound to the WS session we just closed.
+        # fnOS invalidates them on disconnect, so drop them here; the next
+        # business call will re-authenticate cleanly instead of signing with a
+        # stale secret (which would surface as a misleading 65534 → re-login
+        # detour before the real device error such as 266240 is revealed).
+        self._secret = None
+        self._token = None
+        self._long_token = None
+        self._back_id = None
+        self._uid = None
+        self._username_logged = None
 
     async def close(self) -> None:
         await self.disconnect()
@@ -465,6 +482,38 @@ class FnWssClient:
         "serial_number", "serial", "sn", "device_serial",
     )
 
+    # eMMC boot partitions (e.g. mmcblk1boot0 / mmcblk1boot1) are internal
+    # firmware/boot regions, not user-visible storage. smartctl cannot read
+    # SMART from them and they must not surface as disk entities.
+    _EMMC_BOOT_RE = re.compile(r"^mmcblk\d+boot\d+$")
+
+    @staticmethod
+    def _smartctl_unavailable(smart_resp: Any) -> bool:
+        """True when smartctl could not actually read the device.
+
+        fnOS returns result="succ" with a ``smart.smartctl`` block whose
+        ``exit_status`` is non-zero and a message like "Unable to detect
+        device type". This happens for eMMC and other device types the
+        bundled smartctl can't classify — it is a platform limitation, not an
+        integration fault, so it should not raise a WARNING.
+        """
+        if not isinstance(smart_resp, dict):
+            return False
+        smart = smart_resp.get("smart")
+        if not isinstance(smart, dict):
+            return False
+        sc = smart.get("smartctl")
+        if not isinstance(sc, dict):
+            return False
+        if sc.get("exit_status"):
+            return True
+        for msg in sc.get("messages", []) or []:
+            if isinstance(msg, dict) and "Unable to detect device type" in (
+                msg.get("string") or ""
+            ):
+                return True
+        return False
+
     async def get_all_disk_info(self) -> list[dict[str, Any]]:
         """Get complete info for all physical disks.
 
@@ -485,6 +534,12 @@ class FnWssClient:
         for item in disk_list:
             dev = item.get("name")
             if not dev:
+                continue
+
+            # Skip eMMC boot partitions — they are internal firmware regions,
+            # not real disks, and smartctl can't read SMART from them.
+            if self._EMMC_BOOT_RE.match(dev):
+                _LOGGER.debug("fnOS skipping eMMC boot partition %s", dev)
                 continue
 
             # Fallbacks from the disk list itself, used when SMART is missing
@@ -631,12 +686,25 @@ class FnWssClient:
                         and isinstance(smart_resp, dict)
                         and smart_resp.get("diskStandby") == 1
                     )
+                    # smartctl couldn't classify the device (eMMC and similar
+                    # on this firmware). Benign platform limitation — DEBUG, not
+                    # WARNING, so it doesn't spam the log every poll.
+                    smartctl_unavail = self._smartctl_unavailable(smart_resp)
+                    if is_standby:
+                        level = logging.DEBUG
+                        prefix = "(standby)"
+                    elif smartctl_unavail:
+                        level = logging.DEBUG
+                        prefix = "(smartctl unavailable)"
+                    else:
+                        level = logging.WARNING
+                        prefix = "SMART ok but"
                     _LOGGER.log(
-                        logging.DEBUG if is_standby else logging.WARNING,
+                        level,
                         "fnOS disk %s %s missing %s; "
                         "smart keys=%s  resmon keys=%s  smart_resp=%s",
                         dev,
-                        "(standby)" if is_standby else "SMART ok but",
+                        prefix,
                         ", ".join(missing),
                         sorted(smart.keys()) if isinstance(smart, dict) else None,
                         sorted(item.keys()) if isinstance(item, dict) else None,

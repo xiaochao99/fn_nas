@@ -5,7 +5,7 @@
   "documentation": "https://github.com/xiaochao99/fn_nas",
   "dependencies": [],
   "codeowners": ["@xiaochao99"],
-  "requirements": [],
+  "requirements": ["asyncssh"],
   "iot_class": "local_polling",
   "config_flow": true
 }

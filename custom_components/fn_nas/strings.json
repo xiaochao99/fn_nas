@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FlyNAS (fnOS) connection",
+        "description": "Connect to your fnOS NAS over the WebSocket (WSS) API to monitor system, storage and disk information.",
+        "data": {
+          "host": "Host (IP or domain)",
+          "scheme": "Connection protocol",
+          "port": "Port (leave empty for default)",
+          "tls_insecure": "Skip TLS certificate verification (self-signed certs)",
+          "username": "Username",
+          "password": "Password",
+          "scan_interval": "Scan interval (seconds)",
+          "ignore_disks": "Disks to ignore (comma separated, e.g. sda,sdb)",
+          "ssh_port": "SSH port (power & WoL MAC detect, default 22)"
+        }
+      },
+      "reauth": {
+        "title": "Re-authenticate FlyNAS",
+        "description": "Please enter your access credentials."
+      },
+      "select_mac": {
+        "title": "Select interface for Wake-on-LAN",
+        "description": "Multiple network interfaces were detected. Choose the MAC address that should receive the Wake-on-LAN magic packet to power the NAS on.",
+        "data": {
+          "mac": "MAC address (for power-on / WoL)"
+        }
+      },
+      "init": {
+        "title": "FlyNAS options",
+        "description": "Automatically detect or manually set the MAC address used for Wake-on-LAN power-on (host {host}). Requires SSH enabled on the NAS.",
+        "data": {
+          "mac": "MAC address (for power-on / WoL)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the fnOS NAS. Check the host and port.",
+      "wrong_scheme": "Connection refused (SSL error). On the LAN use plain ws on port 5666; if you picked wss, switch to ws or verify the port.",
+      "invalid_auth": "Invalid username or password.",
+      "unknown": "An unknown error occurred. Check the log."
+    },
+    "abort": {
+      "already_configured": "This fnOS NAS is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "机器类型": { "name": "Machine type" },
+      "CPU使用率": { "name": "CPU usage" },
+      "CPU核心数": { "name": "CPU cores" },
+      "内存总量": { "name": "Memory total" },
+      "内存已用": { "name": "Memory used" },
+      "内存使用率": { "name": "Memory usage" },
+      "存储总容量": { "name": "Storage total" },
+      "存储可用空间": { "name": "Storage free" },
+      "系统盘类型": { "name": "System disk type" },
+      "型号": { "name": "Model" },
+      "序列号": { "name": "Serial" },
+      "温度": { "name": "Temperature" },
+      "健康状态": { "name": "Health" },
+      "通电时长": { "name": "Power-on hours" },
+      "寿命消耗": { "name": "Wear level" },
+      "容量": { "name": "Capacity" },
+      "可用": { "name": "Available" },
+      "使用率": { "name": "Usage" },
+      "RAID级别": { "name": "RAID level" }
+    },
+    "binary_sensor": {
+      "健康状态异常": { "name": "Health abnormal" }
+    }
+  }
+}

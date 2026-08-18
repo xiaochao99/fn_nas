@@ -18,8 +18,21 @@ CONF_PASSWORD = "password"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_IGNORE_DISKS = "ignore_disks"
 
+# SSH power-control — the 关机/重启 buttons ALWAYS use SSH. fnOS sometimes
+# refuses the WebSocket ``appcgi.system.poweroff`` call with error 266240
+# (device-side policy / unfinished VM-Docker-tasks block), while ``sudo
+# shutdown``/``reboot`` over SSH is reliably honored. The same SSH connection
+# (at setup time) auto-detects the NIC MAC used for Wake-on-LAN power-on.
+CONF_SSH_PORT = "ssh_port"
+CONF_SSH_SUDO_PASSWORD = "ssh_sudo_password"
+DEFAULT_SSH_PORT = 22
+
 DEFAULT_SCAN_INTERVAL = 30
 DEFAULT_SCHEME = "auto"
+
+# Wake-on-LAN (power-on) — SSH can only shut the NAS down.
+CONF_MAC = "mac"
+DEFAULT_WOL_PORT = 9
 
 # Device identifiers
 DEVICE_ID_NAS = "flynas_nas"
@@ -35,6 +48,7 @@ ICON_CPU = "mdi:chip"
 ICON_MEMORY = "mdi:memory"
 ICON_RESTART = "mdi:restart"
 ICON_POWEROFF = "mdi:power"
+ICON_POWERON = "mdi:power-on"
 
 # System sensor keys (into coordinator.data["system"])
 SYSTEM_MACHINE_TYPE = "machine_type"

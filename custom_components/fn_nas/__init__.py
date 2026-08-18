@@ -55,7 +55,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    coordinator = FlynasCoordinator(hass, dict(entry.data), entry)
+    # Options (e.g. the WoL MAC set via the options flow) override data.
+    config = {**entry.data, **(entry.options or {})}
+    coordinator = FlynasCoordinator(hass, config, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         DATA_UPDATE_COORDINATOR: coordinator
     }

@@ -22,6 +22,9 @@ from .const import (
     CONF_TLS_INSECURE,
     CONF_USERNAME,
     CONF_IGNORE_DISKS,
+    CONF_SSH_PORT,
+    CONF_SSH_SUDO_PASSWORD,
+    DEFAULT_SSH_PORT,
     SYSTEM_MACHINE_TYPE,
     SYSTEM_CPU_USAGE,
     SYSTEM_CPU_CORES,
@@ -63,6 +66,9 @@ class FlynasCoordinator(DataUpdateCoordinator):
             for d in (config.get(CONF_IGNORE_DISKS) or "").split(",")
             if d.strip()
         }
+        # SSH power-control settings — the 关机/重启 buttons always run over SSH.
+        self.ssh_port = int(config.get(CONF_SSH_PORT) or DEFAULT_SSH_PORT)
+        self.ssh_sudo_password = config.get(CONF_SSH_SUDO_PASSWORD) or ""
         self.data: dict[str, Any] = {"system": {}, "disks": [], "pools": []}
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -152,6 +158,53 @@ class FlynasCoordinator(DataUpdateCoordinator):
                 }
             )
         return pools
+
+    async def ssh_poweroff(self) -> None:
+        """Shut the NAS down over SSH (``sudo shutdown -h now``)."""
+        from .ssh_power import SshPowerError, send_power_command
+
+        try:
+            await send_power_command(
+                host=self.config[CONF_HOST],
+                port=self.ssh_port,
+                username=self.config[CONF_USERNAME],
+                password=self.config[CONF_PASSWORD],
+                sudo_password=self.ssh_sudo_password,
+                command="shutdown -h now",
+            )
+        except SshPowerError:
+            raise
+
+    async def ssh_reboot(self) -> None:
+        """Reboot the NAS over SSH (``sudo reboot``)."""
+        from .ssh_power import SshPowerError, send_power_command
+
+        try:
+            await send_power_command(
+                host=self.config[CONF_HOST],
+                port=self.ssh_port,
+                username=self.config[CONF_USERNAME],
+                password=self.config[CONF_PASSWORD],
+                sudo_password=self.ssh_sudo_password,
+                command="reboot",
+            )
+        except SshPowerError:
+            raise
+
+    async def power_control(self, action: str) -> None:
+        """Issue a power action (``poweroff``/``reboot``) over SSH.
+
+        fnOS reliably honors ``sudo shutdown``/``reboot`` over SSH; the
+        WebSocket poweroff API is refused on some firmwares (error 266240), so
+        SSH is used directly for both the 关机 and 重启 buttons.
+        """
+        await self._ssh_power(action)
+
+    async def _ssh_power(self, action: str) -> None:
+        if action == "reboot":
+            await self.ssh_reboot()
+        else:
+            await self.ssh_poweroff()
 
     async def async_disconnect(self) -> None:
         await self.wss.close()
