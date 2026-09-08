@@ -13,8 +13,7 @@
           "password": "Password",
           "scan_interval": "Scan interval (seconds)",
           "ignore_disks": "Disks to ignore (comma separated, e.g. sda,sdb)",
-          "ssh_port": "SSH port (power & WoL MAC detect, default 22)",
-          "device_id": "Device ID (optional, fixed identifier for login device)"
+          "ssh_port": "SSH port (power & WoL MAC detect, default 22)"
         }
       },
       "reauth": {

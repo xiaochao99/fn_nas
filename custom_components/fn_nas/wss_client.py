@@ -32,6 +32,10 @@ DEFAULT_PORT_WS = 5666
 DEFAULT_PORT_WSS_IP = 5667
 DEFAULT_PORT_WSS_DOMAIN = 443
 
+# Fixed device ID for login requests. Using a fixed ID prevents fnOS from
+# creating a new device entry on each reconnect.
+_FIXED_DEVICE_ID = "fnos-ha-integration"
+
 _DIRECT_ENDPOINTS = {"user.login", "user.authToken", "user.tokenLogin"}
 
 _FNOS_ERRORS = {
@@ -97,7 +101,6 @@ class FnWssClient:
         scheme: str | None = None,
         tls_insecure: bool = False,
         timeout: float = 15.0,
-        device_id: str | None = None,
     ) -> None:
         self._host = host
         self._username = username
@@ -105,7 +108,6 @@ class FnWssClient:
         self._tls_insecure = tls_insecure
         self._timeout = timeout
         self._scheme, self._port = self._resolve_endpoint(scheme, port)
-        self._device_id = device_id
 
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -239,9 +241,8 @@ class FnWssClient:
                     "token": self._long_token,
                     "deviceName": "fnOS-HA",
                     "deviceType": "API",
+                    "did": _FIXED_DEVICE_ID,
                 }
-                if self._device_id:
-                    params["did"] = self._device_id
                 resp = await self._raw_call(
                     "user.tokenLogin",
                     params,
@@ -260,9 +261,8 @@ class FnWssClient:
             "stay": 1,
             "deviceName": "fnOS-HA",
             "deviceType": "API",
+            "did": _FIXED_DEVICE_ID,
         }
-        if self._device_id:
-            params["did"] = self._device_id
         resp = await self._raw_call(
             "user.login",
             params,

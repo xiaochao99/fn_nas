@@ -13,8 +13,7 @@
           "password": "密码",
           "scan_interval": "刷新间隔 (秒)",
           "ignore_disks": "忽略的磁盘 (逗号分隔, 如 sda,sdb)",
-          "ssh_port": "SSH 端口 (关机/重启与 MAC 获取, 默认 22)",
-          "device_id": "设备 ID (可选, 固定登录设备标识符)"
+          "ssh_port": "SSH 端口 (关机/重启与 MAC 获取, 默认 22)"
         }
       },
       "reauth": {
