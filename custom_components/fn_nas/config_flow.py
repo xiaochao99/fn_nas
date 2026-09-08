@@ -19,6 +19,7 @@ from .const import (
     CONF_IGNORE_DISKS,
     CONF_SSH_PORT,
     CONF_MAC,
+    CONF_DEVICE_ID,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SCHEME,
     DEFAULT_SSH_PORT,
@@ -37,6 +38,7 @@ async def validate_input(hass, data: dict) -> dict:
         scheme=data.get(CONF_SCHEME, DEFAULT_SCHEME),
         tls_insecure=data.get(CONF_TLS_INSECURE, False),
         timeout=15,
+        device_id=data.get(CONF_DEVICE_ID) or None,
     )
     try:
         info = await client.get_system_info()
@@ -116,6 +118,11 @@ class FlynasConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_SSH_PORT, default=DEFAULT_SSH_PORT
                 ): int,
+                # Device ID — a fixed identifier for the login device. If
+                # provided, the same device ID is used for all login requests,
+                # preventing fnOS from creating a new device entry on each
+                # reconnect. Leave empty to use a random ID (default behavior).
+                vol.Optional(CONF_DEVICE_ID, default=""): str,
             }
         )
         return self.async_show_form(

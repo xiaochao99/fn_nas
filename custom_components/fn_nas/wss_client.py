@@ -97,6 +97,7 @@ class FnWssClient:
         scheme: str | None = None,
         tls_insecure: bool = False,
         timeout: float = 15.0,
+        device_id: str | None = None,
     ) -> None:
         self._host = host
         self._username = username
@@ -104,6 +105,7 @@ class FnWssClient:
         self._tls_insecure = tls_insecure
         self._timeout = timeout
         self._scheme, self._port = self._resolve_endpoint(scheme, port)
+        self._device_id = device_id
 
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -233,13 +235,16 @@ class FnWssClient:
                 pass
         if self._long_token:
             try:
+                params = {
+                    "token": self._long_token,
+                    "deviceName": "fnOS-HA",
+                    "deviceType": "API",
+                }
+                if self._device_id:
+                    params["did"] = self._device_id
                 resp = await self._raw_call(
                     "user.tokenLogin",
-                    {
-                        "token": self._long_token,
-                        "deviceName": "fnOS-HA",
-                        "deviceType": "API",
-                    },
+                    params,
                     signed=False,
                 )
                 self._update_session(resp)
@@ -249,15 +254,18 @@ class FnWssClient:
         await self.login()
 
     async def login(self) -> dict[str, Any]:
+        params = {
+            "user": self._username,
+            "password": self._password,
+            "stay": 1,
+            "deviceName": "fnOS-HA",
+            "deviceType": "API",
+        }
+        if self._device_id:
+            params["did"] = self._device_id
         resp = await self._raw_call(
             "user.login",
-            {
-                "user": self._username,
-                "password": self._password,
-                "stay": 1,
-                "deviceName": "fnOS-HA",
-                "deviceType": "API",
-            },
+            params,
             signed=False,
         )
         self._update_session(resp)

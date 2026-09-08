@@ -17,6 +17,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_IGNORE_DISKS = "ignore_disks"
+CONF_DEVICE_ID = "device_id"
 
 # SSH power-control — the 关机/重启 buttons ALWAYS use SSH. fnOS sometimes
 # refuses the WebSocket ``appcgi.system.poweroff`` call with error 266240

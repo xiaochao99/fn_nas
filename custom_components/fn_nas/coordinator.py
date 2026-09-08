@@ -24,6 +24,7 @@ from .const import (
     CONF_IGNORE_DISKS,
     CONF_SSH_PORT,
     CONF_SSH_SUDO_PASSWORD,
+    CONF_DEVICE_ID,
     DEFAULT_SSH_PORT,
     SYSTEM_MACHINE_TYPE,
     SYSTEM_CPU_USAGE,
@@ -60,6 +61,7 @@ class FlynasCoordinator(DataUpdateCoordinator):
             port=config.get(CONF_PORT),
             scheme=config.get(CONF_SCHEME, "auto"),
             tls_insecure=config.get(CONF_TLS_INSECURE, False),
+            device_id=config.get(CONF_DEVICE_ID),
         )
         self.ignore_disks = {
             d.strip()
